@@ -35,6 +35,10 @@ def export_static(store: CaseStore, out_dir: str) -> str:
 
 
 def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto", vision=None):
+    from .runner import Runner
+
+    runner = Runner(store, inbox, jev, jev_mode, vision) if inbox is not None else None
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
             pass
@@ -54,6 +58,8 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto",
                 return self._send(200, render_index(), "text/html")
             if u.path == "/api/stats":
                 return self._send(200, json.dumps(store.stats()))
+            if u.path == "/api/run":
+                return self._send(200, json.dumps(runner.status() if runner else {"available": False}))
             if u.path == "/api/cases":
                 qs = {k: v[0] for k, v in parse_qs(u.query).items()}
                 rows = store.list(qs.get("status", ""), qs.get("category", ""), qs.get("q", ""), qs.get("pending") == "1")
@@ -103,6 +109,11 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto",
                     return self._send(404, json.dumps({"error": "not found"}))
                 except ValueError as e:
                     return self._send(400, json.dumps({"error": str(e)}))
+            if u.path == "/api/run":
+                if runner is None:
+                    return self._send(409, json.dumps({"error": "start the server with --data to enable processing the inbox"}))
+                started = runner.start(fresh=body.get("fresh", True) is not False)
+                return self._send(200 if started else 409, json.dumps(runner.status() | {"started": started}))
             if u.path == "/api/retry":
                 if inbox is None:
                     return self._send(409, json.dumps({"error": "start the server with --data to enable retries"}))

@@ -55,6 +55,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 <header>
   <h1>Shipping Desk</h1><span class="badge" id="mode">…</span>
   <span class="muted" id="sub"></span><span class="sp"></span>
+  <button class="pri" id="run" title="Read and classify every email in the inbox, check every SI/BL pair, and fill this list">Process inbox</button>
   <button id="retry" title="Re-run emails whose processing failed">Retry failed</button>
 </header>
 <main>
@@ -180,6 +181,29 @@ if (SNAP) $("upload").hidden = true;
 $("mode").textContent = SNAP ? "Snapshot (read-only)" : "Live";
 $("sub").textContent = SNAP ? `exported ${SNAP.exported_at}` : "";
 $("retry").disabled = !!SNAP;
+$("run").disabled = !!SNAP;
+let polling = false;
+async function runStatus(){
+  const s = await api("/api/run");
+  if (s.available === false){ $("run").disabled = true; $("run").title = "Start the server with --data to enable"; return; }
+  if (s.running){
+    $("run").disabled = true; $("run").textContent = `Processing ${s.done} / ${s.total || "…"}`;
+    await load();
+    if (!polling){ polling = true; }
+    setTimeout(runStatus, 600);
+  } else if (polling){
+    polling = false; $("run").disabled = false;
+    $("run").textContent = s.error ? "Process inbox (failed, retry)" : `Processed ${s.done} emails in ${s.seconds}s - run again`;
+    if (s.error) alert("Processing stopped: " + s.error);
+    await load();
+  }
+}
+$("run").onclick = async () => {
+  $("run").disabled = true; $("run").textContent = "Starting…";
+  try { f.view = "all"; sel = null; $("detail").innerHTML = '<div class="empty">Select a case to see the evidence.</div>'; await api("/api/run", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({fresh:true})}); polling = true; runStatus(); }
+  catch(e){ $("run").disabled = false; $("run").textContent = "Process inbox"; }
+};
+if (!SNAP) api("/api/run").then(s => { if (s.available === false){ $("run").hidden = true; } else if (s.running){ polling = true; runStatus(); } }).catch(() => {});
 $("retry").onclick = async () => { $("retry").textContent = "Retrying…"; try { const r = await api("/api/retry", {method:"POST"}); $("retry").textContent = `Retried ${r.retried}, recovered ${r.recovered}`; } catch(e){ $("retry").textContent = "Retry failed"; } await load(); };
 load();
 </script>

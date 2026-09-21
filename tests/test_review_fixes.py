@@ -285,3 +285,28 @@ def test_jev_cache_dir_can_come_from_the_environment(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SDV_JEV_CACHE", str(tmp_path / "shipped"))
     assert str(JevClient(api_key="").cache_dir) == str(tmp_path / "shipped")
+
+
+def test_console_can_process_the_inbox_with_live_progress(tmp_path):
+    import time
+
+    from sdv.inbox import Inbox
+    from sdv.runner import Runner
+
+    d = tmp_path / "data" / "inbox"
+    d.mkdir(parents=True)
+    for i in range(6):
+        (d / f"email_{i:03d}.json").write_text(json.dumps({"email_id": f"email_{i:03d}", "subject": "Happy new year", "body": "Happy new year!", "attachments": []}))
+    s = CaseStore(str(tmp_path / "r.db"))
+    s.upsert({"email_id": "stale_1", "subject": "old", "category": "GENERAL", "status": "OK", "comparisons": [], "evidence": {}})
+    s.upsert({"email_id": "upload_001", "subject": "kept", "category": "BL_COMPARISON", "status": "OK", "comparisons": [], "evidence": {}})
+    r = Runner(s, Inbox(str(tmp_path / "data")), None, "off", None)
+    assert r.start(fresh=True) is True
+    for _ in range(100):
+        if not r.status()["running"]:
+            break
+        time.sleep(0.05)
+    st = r.status()
+    assert not st["running"] and st["done"] == 6 and st["total"] == 6 and not st["error"]
+    ids = {c["email_id"] for c in s.list()}
+    assert "stale_1" not in ids and "upload_001" in ids and len(ids) == 7

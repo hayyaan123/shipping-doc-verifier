@@ -53,6 +53,12 @@ class CaseStore:
                  json.dumps(r, ensure_ascii=False), time.time()),
             )
 
+    def clear_processed(self) -> None:
+        """Forget the processed inbox cases before a fresh run. Uploaded checks and reviewer decisions are kept
+        (a decision re-attaches to its case when the case is processed again)."""
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM cases WHERE email_id NOT LIKE 'upload_%'")
+
     def next_upload_id(self) -> str:
         """Hand out an id no other caller has been given (two simultaneous uploads must not collide)."""
         with self._lock:

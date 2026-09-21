@@ -135,6 +135,10 @@ python -m sdv serve --db out/cases.db --data path/to/bundle     # http://127.0.0
 
 Reviewers confirm, dismiss or clear each MISMATCH / NEEDS_REVIEW case; decisions survive a re-run.
 
+**Process inbox.** The header button (live console started with `--data`) clears the processed cases and runs the whole
+pipeline over the attached inbox, saving each email as it finishes, so the list fills up with a live progress count.
+Uploaded checks and reviewer decisions are kept. The 520 sample emails take about a second without model calls.
+
 **Check two documents.** The console's top panel takes two files (PDF, Word, Excel or text, in any order), works out
 which is the Shipping Instruction and which is the draft BL from their contents, and shows the same field-by-field
 verdict. Each check is saved as a case (`upload_001`, ...). Start the server with `--jev all --vision auto` so
@@ -205,7 +209,7 @@ configured they are handed to a person, never guessed.
 ## Tests
 
 ```bash
-python -m pytest -q                            # 69 tests
+python -m pytest -q                            # 70 tests
 SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data test
 ```
 
@@ -217,7 +221,7 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
 | Stress test: 51 verified-clean emails, 3,213 controlled edits | `stress` | 100% in every class: benign 306 stay OK; defects 459 caught on exactly the edited field; blanks and removals 357 escalated; missing attachment, wrong document, corrupt PDF 153 escalated; unfamiliar labels 255 never a false mismatch; layout quirks 255 stay OK; defect plus layout quirk at the same time 1,326 caught; empty label followed by a measurement 102 escalated |
 | Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf --limit 30` | 2,520/2,520 (see "Odd-PDF test") |
-| Unit and regression tests | `pytest` | 69 pass |
+| Unit and regression tests | `pytest` | 70 pass |
 
 Read these with care:
 
