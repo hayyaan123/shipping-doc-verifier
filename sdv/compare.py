@@ -81,9 +81,21 @@ def compare_field(field: str, si, bl) -> FieldComparison:
     # They differ. Is that a real discrepancy, or a reading problem?
     shaky = fs.provenance != "native" or fb.provenance != "native"
     if shaky and field in _STRING_FIELDS:
-        if edit_distance(_as_text(fs.value), _as_text(fb.value)) <= 2:
-            c.reason = "differs by a character or two and at least one value came from OCR/vision; may be a reading error"
+        a, b = _as_text(fs.value), _as_text(fb.value)
+        # Scan reading drops/adds spaces and swaps look-alike characters; tolerate a fifth of the text (min 2 edits).
+        # This only ever applies to values read from scans, which are never used for a verdict.
+        limit = max(2, max(len(a), len(b)) // 5)
+        if min(edit_distance(a, b), edit_distance(a.replace(" ", ""), b.replace(" ", ""))) <= limit:
+            c.reason = "differs slightly and at least one value came from OCR/vision; may be a reading error"
             return c
+    if shaky and field == "gross_weight_kg":
+        try:
+            x, y = float(fs.value), float(fb.value)
+            if x and y and (abs(x * 1000 - y) < 1 or abs(y * 1000 - x) < 1):
+                c.reason = "weights differ only by a thousands/decimal separator; likely a scan misread"
+                return c
+        except (TypeError, ValueError):
+            pass
     if shaky and field not in _STRING_FIELDS and (fs.confidence < 0.9 or fb.confidence < 0.9):
         c.reason = "numeric values differ but one read is low confidence; not tolerated, sent to review"
         return c

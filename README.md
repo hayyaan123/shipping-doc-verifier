@@ -79,8 +79,14 @@ reviewer knows where to look first. It never changes the status, reason or defec
 python -m sdv run --data path/to/bundle --out out --vision auto --db out/cases.db
 ```
 
-`auto` uses the vision model when a key is set and Tesseract otherwise. On the 3 scanned pairs, Tesseract misreads
-characters ("PTE" as "FTE", "(M)" as "(MM)"), which is exactly why a scan is never trusted for a verdict.
+`auto` uses the vision model when a key is set and Tesseract otherwise.
+
+Measured on the 3 scanned pairs (6 documents) with `Qwen/Qwen3-VL-30B-A3B-Instruct`: all 7 fields were extracted
+from all 6 scans, with 6/6 model calls succeeding. It also misread: a thousands comma became a decimal point
+(`128,544` read as `128.544`, in 2 of 3 pairs) and one port name was garbled. Local Tesseract misreads other
+characters ("PTE" as "FTE"). Neither is reliable enough to decide a verdict, which is why scans are escalated and the
+reading is only a hint. Hints tolerate this kind of scan noise (a separator slip or spacing is "uncertain", not a
+"difference").
 
 ## Review console and case store
 
