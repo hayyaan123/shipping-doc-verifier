@@ -41,6 +41,13 @@ def main(argv=None) -> int:
     st.add_argument("--jev", choices=["off", "auto", "all"], default="off", help="also let Jev resolve unfamiliar labels")
     st.add_argument("--env", default=".env")
 
+    od = sub.add_parser("oddpdf", help="re-render documents as unusual PDF layouts and check the verdicts")
+    od.add_argument("--data", required=True)
+    od.add_argument("--out", default="out")
+    od.add_argument("--limit", type=int, default=20)
+    od.add_argument("--jev", choices=["off", "auto", "all"], default="off")
+    od.add_argument("--env", default=".env")
+
     srv = sub.add_parser("serve", help="run the review console over a case store")
     srv.add_argument("--db", default="out/cases.db")
     srv.add_argument("--port", type=int, default=8000)
@@ -60,7 +67,7 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
-    if args.cmd in ("run", "stress"):
+    if args.cmd in ("run", "stress", "oddpdf"):
         from .deps import MissingDependency, require
 
         try:
@@ -73,6 +80,14 @@ def main(argv=None) -> int:
         return _audit(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "oddpdf":
+        from .oddpdf import format_summary, run_oddpdf
+
+        jev = _jev(args.env) if args.jev != "off" else None
+        print(format_summary(run_oddpdf(Inbox(args.data), args.out, args.limit, jev, args.jev)))
+        if jev:
+            print(f"[jev] live calls={jev.calls} cache hits={jev.cache_hits} failures={jev.failures}")
+        return 0
     if args.cmd == "stress":
         from .stress import format_summary, run_stress
 

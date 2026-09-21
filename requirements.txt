@@ -5,3 +5,6 @@ openpyxl>=3.1
 
 # Tests
 pytest>=7
+
+# Dev only: the odd-PDF test renders test documents with reportlab
+reportlab>=4.0

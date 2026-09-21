@@ -17,6 +17,7 @@ from .models import FIELDS, DocRecord, ExtractedField
 from .normalize import is_blank, normalize
 import re
 
+_CONTAINER_ID = re.compile(r"\b[A-Z]{4}\d{6,7}\b")
 _LEAD = re.compile(r"^[\s:\-\u2013\u2014]+")
 _UNKNOWN_LABEL = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 /().,'\-]{2,60}?)\s*:\s*(\S.*)$")
 
@@ -47,6 +48,8 @@ def extract_fields(
         if out[f].found:
             continue  # first occurrence wins (summary lines, not table rows)
         raw = _value_after(line, end)
+        if f == "container_count" and _CONTAINER_ID.search(raw):
+            continue  # a row of the container table ("Container 1  GLBV3136500 40'HC ..."), not the count
         if not raw:
             # Value may sit on the next line when the label line ends with only a colon/spacing.
             j = i + 1

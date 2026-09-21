@@ -37,7 +37,8 @@ _MATCH_ORDER = ["notify_party", "consignee", "shipper", "port_of_loading", "port
 # Guard: the container TABLE header ("CONTAINER NO.  DESCRIPTION ...") must never read as a container count.
 _TABLE_HEADER = re.compile(r"^\s*container\s+no\b", re.I)
 _NON_ASCII = re.compile(r"[^\x00-\x7f]")
-_GLOSS = re.compile(r"\s*\([^)]*[^\x00-\x7f][^)]*\)")
+# A gloss is a parenthetical with non-ASCII text, or an EMPTY one left behind when a scan/PDF font drops the glyphs.
+_GLOSS = re.compile(r"\s*\((?:\s*|[^)]*[^\x00-\x7f][^)]*)\)")
 
 
 def asciify(line: str) -> str:

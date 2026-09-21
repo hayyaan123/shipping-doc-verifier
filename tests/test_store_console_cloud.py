@@ -150,3 +150,20 @@ def test_missing_library_is_a_loud_error_not_an_unreadable_verdict(monkeypatch):
         assert "requirements.txt" in str(e)
         return
     raise AssertionError("expected MissingDependency")
+
+
+def test_odd_pdf_layouts_small_run():
+    import os
+
+    data = os.environ.get("SDV_DATA")
+    try:
+        import reportlab  # noqa: F401
+    except ImportError:
+        return
+    if not data:
+        return
+    from sdv.inbox import Inbox
+    from sdv.oddpdf import run_oddpdf
+
+    s = run_oddpdf(Inbox(data), out_dir="out", limit=3, keep_samples=False)
+    assert s["passed"] == s["cases"], [r for r in s["rows"] if r["passed"] < r["cases"]][:2]

@@ -69,6 +69,14 @@ def test_edit_distance():
     assert edit_distance("a", "a") == 0
 
 
+def test_number_formats_are_read_as_written_in_that_convention():
+    from sdv.normalize import normalize_weight_kg as w
+
+    for raw in ["21,577 KG", "21.577,00 KG", "21 577 KG", "21\u00a0577 kg", "21'577 KG", "21577", "21577.00 KGS", "21.577 KG", "21,577.00 KGS", "21.577 MT", "21,577 kgs"]:
+        assert w(raw) == 21577.0, raw
+    assert w("21577,50 KG") == 21577.5 and w("0.500 KG") == 0.5 and w("____ MT") is None
+
+
 def test_scan_reading_noise_is_uncertain_not_mismatch_but_native_text_stays_strict():
     from sdv.compare import compare_field
     from sdv.models import DocRecord, ExtractedField
@@ -77,10 +85,10 @@ def test_scan_reading_noise_is_uncertain_not_mismatch_but_native_text_stays_stri
     def rec(field, raw, prov):
         return DocRecord(name="x", fields={field: ExtractedField(field=field, value=normalize(field, raw), raw=raw, found=True, provenance=prov)})
 
-    # scan: dot vs comma in the weight, and spacing noise in a port
-    assert compare_field("gross_weight_kg", rec("gross_weight_kg", "128,544 KG", "vision"), rec("gross_weight_kg", "128.544 KG", "vision")).verdict == "uncertain"
+    # the same weight written with a decimal point instead of a comma is now the same number
+    assert compare_field("gross_weight_kg", rec("gross_weight_kg", "128,544 KG", "vision"), rec("gross_weight_kg", "128.544 KG", "vision")).verdict == "match"
     assert compare_field("port_of_loading", rec("port_of_loading", "NHA VA SHIEVA INDIA", "vision"), rec("port_of_loading", "INHAVA SHEVA, INDIA", "vision")).verdict == "uncertain"
-    # native text: the same one-thousand-fold difference is a real mismatch
-    assert compare_field("gross_weight_kg", rec("gross_weight_kg", "128,544 KG", "native"), rec("gross_weight_kg", "128.544 KG", "native")).verdict == "mismatch"
+    # a genuinely different weight in native text is still a mismatch
+    assert compare_field("gross_weight_kg", rec("gross_weight_kg", "128,544 KG", "native"), rec("gross_weight_kg", "128,545 KG", "native")).verdict == "mismatch"
     # scans do not hide a genuinely different value
     assert compare_field("consignee", rec("consignee", "ACME TRADING LLC", "vision"), rec("consignee", "ZEBRA LOGISTICS PTE", "vision")).verdict == "mismatch"

@@ -37,6 +37,7 @@ escalated to a human instead of guessed.
 | `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
 | `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
 | `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift) |
+| `sdv/oddpdf.py` | Re-renders documents as 16 unusual PDF layouts and checks the verdicts |
 | `sdv/vision.py` | Open-weights vision model / Tesseract that reads scanned PDFs as an unverified reviewer hint |
 | `sdv/cloud.py` | Mirror cases and decisions to Cloud Firestore |
 
@@ -117,6 +118,20 @@ Warnings mean "the input no longer looks like the development data: read the esc
 Model calls run in a small thread pool (4 workers) and are cached, so a re-run is cheap. When the organizers'
 server is available, `--submit` returns the official score, the only real measure on unseen data.
 
+## Odd-PDF test
+
+`python -m sdv oddpdf --data path/to/bundle` (needs `reportlab`) re-renders one of the two documents of verified-clean
+emails in 16 layouts the readers were not built on and 5 weight formats, once unchanged and once with one value edited,
+on each side. Unchanged must give OK, an edited value must give MISMATCH on exactly that field, unreadable files must be
+escalated, and for unfamiliar wording the rule is "never a false MISMATCH, never a silent OK for a changed value".
+Sample PDFs are written to `out/oddpdf/` so they can be inspected.
+
+First run: 382/504 (75.8%). It exposed real gaps that the 520-email set could not: rotated pages read as nonsense,
+European (`21.577,00`) and space-grouped (`21 577`) weights reported as false MISMATCHes, a "Container 1 ..." table row
+read as the container count, empty parentheses left by a dropped CJK font breaking label matching, and the second
+extraction path not following a value on the line below its label. All were fixed generally (not per file). After the
+fixes: 2,520/2,520 on 30 emails. These layouts are ones we thought of, so they are evidence of robustness, not proof.
+
 ## Tests
 
 ```bash
@@ -131,6 +146,8 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | Rules-only pipeline vs the organizers' reference labels, 520 emails | `run --jev off` + `scripts/eval_local.py` | 0 disagreements |
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
 | Stress test: 51 verified-clean emails, 1,530 controlled edits | `stress` | benign 306/306 stay OK; defects 459/459 caught on exactly the edited field; blanks and removals 357/357 escalated; missing attachment, wrong document, corrupt PDF 153/153 escalated; unfamiliar labels 255/255 never a false mismatch (rules-only: all escalated to a person) |
+
+| Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf` | see "Odd-PDF test" below |
 
 Read these with care:
 

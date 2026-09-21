@@ -102,15 +102,39 @@ _NUM = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
 _TONNE = re.compile(r"\b(?:mts?|tonnes?|tons?)\b", re.I)
 
 
+_GROUPED = re.compile(r"\d{1,3}(?:[ \u00a0\u202f']\d{3})+(?:[.,]\d+)?")
+_PLAIN = re.compile(r"\d[\d,.]*")
+
+
+def _to_number(tok: str, tonnes: bool) -> float:
+    """Parse '21,577'  '21.577,00'  '21 577'  '21577.5'  '21.577' (kg) into a float, reading the separators sensibly."""
+    t = re.sub(r"[ \u00a0\u202f']", "", tok).rstrip(".,")
+    if "," in t and "." in t:
+        dec = "," if t.rfind(",") > t.rfind(".") else "."
+        thou = "." if dec == "," else ","
+        return float(t.replace(thou, "").replace(dec, "."))
+    if "," in t:
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+", t):
+            return float(t.replace(",", ""))
+        if re.fullmatch(r"\d+,\d{1,2}", t):
+            return float(t.replace(",", "."))
+        return float(t.replace(",", ""))
+    if "." in t and not tonnes and re.fullmatch(r"[1-9]\d{0,2}(?:\.\d{3})+", t):
+        return float(t.replace(".", ""))  # 21.577 kg: a thousands separator (no cargo weighs 21 grams)
+    return float(t)
+
+
 def normalize_weight_kg(raw: str) -> Optional[float]:
     """Number with separators/units stripped; tonnes converted to kilograms."""
-    m = _NUM.search(raw)
+    m = _GROUPED.search(raw) or _PLAIN.search(raw)
     if not m:
         return None
-    v = float(m.group(1).replace(",", ""))
-    if _TONNE.search(raw[m.end():]):
-        v *= 1000.0
-    return v
+    tonnes = bool(_TONNE.search(raw[m.end():]))
+    try:
+        v = _to_number(m.group(0), tonnes)
+    except ValueError:
+        return None
+    return v * 1000.0 if tonnes else v
 
 
 def normalize(field: str, raw: str):

@@ -37,6 +37,47 @@ def read_text_bytes(data: bytes) -> DocText:
     return DocText("txt", lines)
 
 
+def _rotated_text(page) -> str:
+    """Text of a page whose /Rotate is 90/180/270. pdfplumber reports such text as vertical runs, so put the
+    lines back together ourselves: lines are the columns (or rows, at 180), read in the page's visual order."""
+    rot = page.rotation
+    chars = [c for c in page.chars if c["text"] != "\n"]
+    if not chars:
+        return ""
+    # (line coordinate, position along the line, line order sign, position order sign)
+    if rot == 90:
+        line_of, pos_of, line_rev, pos_rev = (lambda c: c["x0"]), (lambda c: c["top"]), True, False
+    elif rot == 270:
+        line_of, pos_of, line_rev, pos_rev = (lambda c: c["x0"]), (lambda c: c["top"]), False, True
+    else:  # 180
+        line_of, pos_of, line_rev, pos_rev = (lambda c: c["top"]), (lambda c: c["x0"]), True, True
+    chars.sort(key=line_of)
+    lines, cur, last = [], [], None
+    for c in chars:
+        k = line_of(c)
+        if last is not None and abs(k - last) > 3:
+            lines.append(cur)
+            cur = []
+        cur.append(c)
+        last = k
+    lines.append(cur)
+    if line_rev:
+        lines.reverse()
+    out = []
+    for ln in lines:
+        ln.sort(key=pos_of, reverse=pos_rev)
+        txt, prev = "", None
+        gaps = [abs(pos_of(b) - pos_of(a)) for a, b in zip(ln, ln[1:])]
+        typical = sorted(gaps)[len(gaps) // 2] if gaps else 0
+        for c in ln:
+            if prev is not None and typical and abs(pos_of(c) - pos_of(prev)) > 1.9 * typical and not txt.endswith(" ") and c["text"] != " ":
+                txt += " "
+            txt += c["text"]
+            prev = c
+        out.append(txt.rstrip())
+    return "\n".join(out)
+
+
 def read_pdf_bytes(data: bytes) -> DocText:
     try:
         import pdfplumber
@@ -49,7 +90,8 @@ def read_pdf_bytes(data: bytes) -> DocText:
             pages = len(pdf.pages)
             # use_text_flow keeps each text run intact: without it a long label that overlaps the value column
             # gets interleaved with the value ("ConsKiTgPne CeO." for "Consignee" + "KTP CO.").
-            chunks = [(p.extract_text(use_text_flow=True, layout=True) or "") for p in pdf.pages]
+            chunks = [(_rotated_text(p) if p.rotation in (90, 180, 270) else (p.extract_text(use_text_flow=True, layout=True) or ""))
+                      for p in pdf.pages]
     except Exception as e:  # corrupt / truncated / not a PDF: nothing to read
         return DocText("pdf", readable=False, error=f"cannot be parsed ({type(e).__name__}: {str(e)[:80]})", text_layer=False)
     lines = []

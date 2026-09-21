@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .labels import LABEL_PATTERNS, asciify
+from .labels import LABEL_PATTERNS, asciify, looks_like_label
 from .normalize import is_blank, normalize
 
 _STOP = re.compile(r"\s{3,}|\s+(?:booking|b/?l)\b|$", re.I)
@@ -20,8 +20,16 @@ _STOP = re.compile(r"\s{3,}|\s+(?:booking|b/?l)\b|$", re.I)
 def second_read(lines: list, field: str):
     """Independent value for `field`, or None if this path cannot find one."""
     rx = re.compile(r"(?:^|[\s(])(?:" + LABEL_PATTERNS[field] + r")\s*(?:\([^)]*\))?\s*[:\-]?\s+", re.I)
-    for line in lines:
+    alone = re.compile(r"^\s*(?:" + LABEL_PATTERNS[field] + r")\s*(?:\([^)]*\))?\s*[:\-]?\s*$", re.I)
+    for idx, line in enumerate(lines):
         a = asciify(line)
+        if alone.match(a):  # label on its own line: the value is the next non-empty line
+            nxt = next((l for l in lines[idx + 1:] if l.strip()), "")
+            if nxt.strip() and not looks_like_label(nxt) and not is_blank(nxt.strip()):
+                val = normalize(field, nxt.strip())
+                if val not in (None, "", ("", None)):
+                    return val, nxt.strip()
+            continue
         m = rx.search(a)
         if not m:
             continue
@@ -32,7 +40,7 @@ def second_read(lines: list, field: str):
         stop = _STOP.search(tail)
         cand = tail[: stop.start()] if stop else tail
         cand = cand.strip()
-        if is_blank(cand):
+        if is_blank(cand) or (field == "container_count" and re.search(r"\b[A-Z]{4}\d{6,7}\b", cand)):
             continue
         val = normalize(field, cand)
         if val not in (None, "", ("", None)):
