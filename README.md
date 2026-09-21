@@ -33,6 +33,10 @@ escalated to a human instead of guessed.
 | `sdv/triage.py` | Email classification: rules first, Jev when rules are unsure |
 | `sdv/pipeline.py` | Orchestration; per-email failures are captured, not fatal |
 | `sdv/report.py`, `submission.py` | `results.json`, `report.txt`, `report.html`, submission JSON |
+| `sdv/store.py` | SQLite case store; reviewer decisions; failed cases are retryable and distinct from verdicts |
+| `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
+| `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
+| `sdv/cloud.py` | Mirror cases and decisions to Cloud Firestore |
 
 ## Run
 
@@ -49,6 +53,37 @@ python -m sdv run --data path/to/bundle --out out --jev auto
 ```
 
 `--data` accepts an extracted bundle folder or the URL of the hackathon server.
+
+## Where Jev is used
+
+1. **Email triage** (`sdv/triage.py`): typed `choice` for the category and a `noul` for "is the sender only
+   asking for the draft to be sent?". `--jev auto` asks Jev where the rules are unsure; `--jev all` asks on every
+   email and lets a confident Jev (>= 0.9) overrule the rules.
+2. **Unfamiliar field labels** (`sdv/pipeline.py`): when a document uses a label the patterns do not know, Jev maps
+   it to one of the 7 fields or to "none". Code then reads the value; Jev never reads or invents values.
+3. **Audit** (`python -m sdv audit`): asks Jev about every email and reports every disagreement with the rules.
+
+Jev decides *what kind of thing this is*. Code decides *whether two values match*.
+
+## Review console and case store
+
+```bash
+python -m sdv run --data path/to/bundle --out out --jev auto --db out/cases.db
+python -m sdv serve --db out/cases.db --data path/to/bundle     # http://127.0.0.1:8000
+```
+
+Reviewers confirm, dismiss or clear each MISMATCH / NEEDS_REVIEW case; decisions survive a re-run.
+`--data` on `serve` enables "Retry failed" (re-runs only cases that failed processing).
+
+## Cloud (free tier, no credit card)
+
+- **Case store: Cloud Firestore (Spark plan).** Setup steps are in the docstring of `sdv/cloud.py`.
+  `python -m sdv sync push --db out/cases.db` uploads; `sync pull` brings back decisions made elsewhere.
+- **Hosted console: Vercel Hobby.** `python -m sdv export --db out/cases.db --out site` writes a read-only
+  static console; deploy the `site/` folder. Anyone with the URL can read it, so only deploy data you are
+  allowed to show. `site/` is git-ignored.
+
+Both are unverified against the organizers' definition of "cloud"; ask before the deadline.
 
 ## Tests
 
