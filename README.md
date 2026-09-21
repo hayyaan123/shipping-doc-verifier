@@ -5,6 +5,35 @@ email, and for bill-of-lading comparison requests compares the Shipping Instruct
 against the draft Bill of Lading (BL) on 7 fields. Anything it cannot verify is
 escalated to a human instead of guessed.
 
+## Quick start (setup)
+
+```bash
+git clone https://github.com/hayyaan123/shipping-doc-verifier && cd shipping-doc-verifier
+pip install -r requirements.txt                    # Python 3.10+
+# The synthetic sample inbox (520 emails) is bundled in demo/data. No key needed for a first run:
+python -m sdv run --data demo/data --out out --jev off --db out/cases.db
+python -m sdv serve --db out/cases.db --data demo/data      # console at http://127.0.0.1:8000
+```
+
+Or with Docker: `docker compose up --build` and open http://localhost:7860.
+A live copy runs on a free cloud host (see "Hosting the console publicly"); its link is in the submission form.
+Jev is optional: put `TYPESAFE_API_KEY=...` in `.env` (copy `.env.example`) to turn it on.
+
+## How it works
+
+```
+email (subject, body, attachments)
+  -> triage: rules first, Jev (typed decision + confidence) where they are unsure -> 5 categories
+  -> if a comparison request with 2 attachments:
+       read PDF / Word / Excel / text  -> lines
+       decide SI vs BL from the CONTENT, not the file name
+       extract 7 fields (label patterns; unfamiliar labels are mapped by Jev, which may only PICK a field)
+       compare per field: match / mismatch / uncertain
+       every claimed mismatch is re-read by a second, independent extraction path
+       anything unverifiable -> NEEDS_REVIEW with one of 4 reasons, for a person to decide
+  -> submission JSON + case store + review console
+```
+
 ## Principles
 
 - **AI reads, code decides.** Jev (TypeSafe) makes typed, confidence-scored judgments
@@ -114,13 +143,13 @@ uploaded scans also get the AI reading hint. Uploads work only in the live conso
 
 ## Cloud (free tier, no credit card)
 
-- **Case store: Cloud Firestore (Spark plan).** Setup steps are in the docstring of `sdv/cloud.py`.
-  `python -m sdv sync push --db out/cases.db` uploads; `sync pull` brings back decisions made elsewhere.
-- **Hosted console: Vercel Hobby.** `python -m sdv export --db out/cases.db --out site` writes a read-only
-  static console; deploy the `site/` folder. Anyone with the URL can read it, so only deploy data you are
-  allowed to show. `site/` is git-ignored.
-
-Both are unverified against the organizers' definition of "cloud"; ask before the deadline.
+- **Hosted console: Render free web service**, built from the `Dockerfile` (see "Hosting the console publicly").
+  This is the public, working prototype.
+- **Optional: Cloud Firestore (Spark plan)** as a durable case store, so reviewer decisions survive container
+  restarts. Setup steps are in the docstring of `sdv/cloud.py`; `python -m sdv sync push --db out/cases.db` uploads and
+  `sync pull` brings decisions back. Not exercised against a live project yet.
+- **Read-only snapshot:** `python -m sdv export --db out/cases.db --out site` writes a static console (any static
+  host). It has no upload check, so it is not the live prototype.
 
 ## Running on data it was not built on
 
@@ -163,10 +192,20 @@ A free service sleeps after 15 minutes without traffic (about a minute to wake);
 building, the hosted console shows the classifications made with Jev and still needs no key. A hosted copy keeps
 reviewer decisions only until the container restarts.
 
+## Scaling and limits
+
+The unit of work is one email and emails are independent, so a run parallelises trivially: `process_all` already uses
+a worker pool for model calls, and the pipeline itself is CPU-light (520 emails in about a second without models).
+Model answers are cached by content, so a re-run costs nothing. At the volume the brief mentions (about 2,000 emails a
+day) one small container is enough for the pipeline. What would change first: the console's built-in HTTP server and
+SQLite case store are fine for a team of reviewers, but a larger deployment would put a real web server and a hosted
+database (Firestore or Postgres) behind the same `CaseStore` interface. Scans need a vision model or OCR; until one is
+configured they are handed to a person, never guessed.
+
 ## Tests
 
 ```bash
-python -m pytest -q
+python -m pytest -q                            # 69 tests
 SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data test
 ```
 
@@ -176,9 +215,9 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | --- | --- | --- |
 | Rules-only pipeline vs the organizers' reference labels, 520 emails | `run --jev off` + `scripts/eval_local.py` | 0 disagreements |
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
-| Stress test: 51 verified-clean emails, 3,000+ controlled edits incl. 1,224 defect-plus-layout combinations | `stress` | benign 306/306 stay OK; defects 459/459 caught on exactly the edited field; blanks and removals 357/357 escalated; missing attachment, wrong document, corrupt PDF 153/153 escalated; unfamiliar labels 255/255 never a false mismatch (rules-only: all escalated to a person) |
-
-| Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf` | see "Odd-PDF test" below |
+| Stress test: 51 verified-clean emails, 3,213 controlled edits | `stress` | 100% in every class: benign 306 stay OK; defects 459 caught on exactly the edited field; blanks and removals 357 escalated; missing attachment, wrong document, corrupt PDF 153 escalated; unfamiliar labels 255 never a false mismatch; layout quirks 255 stay OK; defect plus layout quirk at the same time 1,326 caught; empty label followed by a measurement 102 escalated |
+| Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf --limit 30` | 2,520/2,520 (see "Odd-PDF test") |
+| Unit and regression tests | `pytest` | 69 pass |
 
 Read these with care:
 
