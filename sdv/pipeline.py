@@ -54,10 +54,15 @@ def _load_docs(email: dict, inbox, resolver):
     return records, texts
 
 
-def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=None) -> EmailResult:
+def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=None, skip_triage: bool = False) -> EmailResult:
     eid = email["email_id"]
     res = EmailResult(email_id=eid, subject=email.get("subject", ""))
-    tri = triage(email, jev, jev_mode)
+    if skip_triage:  # a person uploaded the two documents to be compared: no need to guess what the email is
+        from .triage import Triage
+
+        tri = Triage("BL_COMPARISON", 1.0, "user request", False, ["documents uploaded for comparison"])
+    else:
+        tri = triage(email, jev, jev_mode)
     res.category, res.category_confidence, res.category_method = tri.category, tri.confidence, tri.method
     res.evidence["triage_notes"] = tri.notes
 
@@ -227,3 +232,29 @@ def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = 
             if progress:
                 progress(n + 1)
     return results
+
+
+class _BytesInbox:
+    def __init__(self, files: dict):
+        self.files = files
+
+    def read_bytes(self, path: str) -> bytes:
+        return self.files[path]
+
+
+def check_uploaded(files: list, email_id: str = "upload", jev=None, jev_mode: str = "off", vision=None) -> EmailResult:
+    """Compare documents a person supplied directly. `files` = [(file name, bytes), ...]; the SI/BL roles are
+    worked out from the contents, exactly as for an inbox email."""
+    names = [f"uploads/{email_id}_{i}_{n.replace('/', '_')}" for i, (n, _) in enumerate(files)]
+    email = {"email_id": email_id, "subject": "Uploaded documents: " + " + ".join(n for n, _ in files),
+             "body": "", "attachments": names}
+    box = _BytesInbox({p: data for p, (_, data) in zip(names, files)})
+    try:
+        return process_email(email, box, jev, jev_mode, vision, skip_triage=True)
+    except MissingDependency:
+        raise
+    except Exception as e:
+        r = EmailResult(email_id=email_id, subject=email["subject"], category="BL_COMPARISON")
+        r.error = f"{type(e).__name__}: {e}"
+        r.summary = f"Processing failed (retryable): {r.error}"
+        return r

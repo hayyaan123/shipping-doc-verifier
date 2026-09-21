@@ -97,6 +97,11 @@ python -m sdv serve --db out/cases.db --data path/to/bundle     # http://127.0.0
 ```
 
 Reviewers confirm, dismiss or clear each MISMATCH / NEEDS_REVIEW case; decisions survive a re-run.
+
+**Check two documents.** The console's top panel takes two files (PDF, Word, Excel or text, in any order), works out
+which is the Shipping Instruction and which is the draft BL from their contents, and shows the same field-by-field
+verdict. Each check is saved as a case (`upload_001`, ...). Start the server with `--jev all --vision auto` so
+uploaded scans also get the AI reading hint. Uploads work only in the live console, not in the static export.
 `--data` on `serve` enables "Retry failed" (re-runs only cases that failed processing).
 
 ## Cloud (free tier, no credit card)

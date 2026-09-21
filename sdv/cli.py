@@ -53,6 +53,8 @@ def main(argv=None) -> int:
     srv.add_argument("--port", type=int, default=8000)
     srv.add_argument("--data", default=None, help="optional: enables the console's Retry-failed button")
     srv.add_argument("--jev", choices=["off", "auto", "all"], default="off")
+    srv.add_argument("--vision", choices=["off", "auto", "vlm", "tesseract"], default="off",
+                     help="read image-only PDFs uploaded to the console as an unverified hint")
     srv.add_argument("--env", default=".env")
 
     exp = sub.add_parser("export", help="write a read-only static console (index.html) for free hosting")
@@ -184,7 +186,12 @@ def _serve(args) -> int:
 
     inbox = Inbox(args.data) if args.data else None
     jev = _jev(args.env) if args.jev != "off" else None
-    serve(CaseStore(args.db), port=args.port, inbox=inbox, jev=jev, jev_mode=args.jev)
+    vision = None
+    if args.vision != "off":
+        from .vision import VisionReader
+
+        vision = VisionReader.from_env(args.env, args.vision)
+    serve(CaseStore(args.db), port=args.port, inbox=inbox, jev=jev, jev_mode=args.jev, vision=vision)
     return 0
 
 

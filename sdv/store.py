@@ -49,6 +49,13 @@ class CaseStore:
                  json.dumps(r, ensure_ascii=False), time.time()),
             )
 
+    def next_upload_id(self) -> str:
+        row = self._db.execute("SELECT COUNT(*) FROM cases WHERE email_id LIKE 'upload_%'").fetchone()
+        n = row[0] + 1
+        while self.get(f"upload_{n:03d}") is not None:
+            n += 1
+        return f"upload_{n:03d}"
+
     def upsert_many(self, rows: list) -> None:
         for r in rows:
             self.upsert(r)

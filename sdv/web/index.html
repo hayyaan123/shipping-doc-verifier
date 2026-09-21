@@ -43,6 +43,11 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--bg)}tbody tr.sel{backgro
 textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);min-height:54px}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .empty{padding:40px;text-align:center;color:var(--mute)}
+#upload{padding:14px 16px;margin-bottom:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+#upload h2{margin:0;font-size:15px}#upload .muted{font-size:13px}
+.drop{flex:1;min-width:260px;border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;cursor:pointer;color:var(--mute)}
+.drop.over,.drop:hover{border-color:var(--acc);color:var(--ink);background:var(--accbg)}
+.drop input{display:none}.err{color:var(--bad);font-size:13px;margin-top:6px}
 code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 </style>
 </head>
@@ -53,6 +58,12 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
   <button id="retry" title="Re-run emails whose processing failed">Retry failed</button>
 </header>
 <main>
+  <section class="panel" id="upload">
+    <div style="flex:1;min-width:240px"><h2>Check two documents</h2><div class="muted">Add the Shipping Instruction and the draft Bill of Lading (PDF, Word, Excel or text), in any order. The system works out which is which.</div></div>
+    <label class="drop" id="drop"><input type="file" id="files" multiple accept=".pdf,.docx,.xlsx,.txt"><span id="picked">Drop files here or click to choose</span></label>
+    <button class="pri" id="check">Check</button>
+    <div class="err" id="uploaderr" style="flex-basis:100%" hidden></div>
+  </section>
   <div class="stats" id="stats"></div>
   <div class="bar" id="bar"></div>
   <div class="grid">
@@ -144,6 +155,28 @@ function detail(){
   });
 }
 function render(){ stats(); bar(); renderRows(); if (sel) detail(); }
+let picked = [];
+function showPicked(){ $("picked").textContent = picked.length ? picked.map(f => f.name).join("  ·  ") : "Drop files here or click to choose"; $("uploaderr").hidden = true; }
+$("files").onchange = e => { picked = [...e.target.files]; showPicked(); };
+["dragenter","dragover"].forEach(ev => $("drop").addEventListener(ev, e => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave","drop"].forEach(ev => $("drop").addEventListener(ev, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", e => { picked = [...e.dataTransfer.files]; showPicked(); });
+function b64(file){ return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = no; r.readAsDataURL(file); }); }
+$("check").onclick = async () => {
+  const err = m => { $("uploaderr").textContent = m; $("uploaderr").hidden = false; };
+  if (picked.length < 2) return err("Choose both documents first (the Shipping Instruction and the draft Bill of Lading).");
+  if (picked.length > 4) return err("Choose at most 4 files.");
+  $("check").disabled = true; $("check").textContent = "Checking…"; $("uploaderr").hidden = true;
+  try {
+    const files = await Promise.all(picked.map(async f => ({name: f.name, data: await b64(f)})));
+    const res = await api("/api/check", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({files})});
+    picked = []; $("files").value = ""; showPicked();
+    await load(); f.view = "all"; f.q = ""; sel = res.email_id; render(); detail();
+    $("detail").scrollIntoView({behavior:"smooth", block:"nearest"});
+  } catch(e){ let m = String(e.message || e); try { m = JSON.parse(m).error || m; } catch(_){} err("Could not check: " + m); }
+  $("check").disabled = false; $("check").textContent = "Check";
+};
+if (SNAP) $("upload").hidden = true;
 $("mode").textContent = SNAP ? "Snapshot (read-only)" : "Live";
 $("sub").textContent = SNAP ? `exported ${SNAP.exported_at}` : "";
 $("retry").disabled = !!SNAP;

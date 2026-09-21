@@ -34,7 +34,7 @@ def export_static(store: CaseStore, out_dir: str) -> str:
     return str(out / "index.html")
 
 
-def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto"):
+def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto", vision=None):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
             pass
@@ -64,6 +64,25 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto")
                 return self._send(200 if c else 404, json.dumps(c or {"error": "not found"}, ensure_ascii=False))
             self._send(404, json.dumps({"error": "not found"}))
 
+        def _check(self, body: dict):
+            """Compare two documents a person uploaded. Body: {"files": [{"name": ..., "data": <base64>}, ...]}."""
+            import base64
+
+            from .pipeline import check_uploaded
+
+            raw = body.get("files") or []
+            if not (1 <= len(raw) <= 4) or not all(isinstance(f, dict) and f.get("name") and f.get("data") for f in raw):
+                return self._send(400, json.dumps({"error": "send 1 to 4 files as {name, data(base64)}"}))
+            try:
+                files = [(str(f["name"])[:120], base64.b64decode(f["data"], validate=True)) for f in raw]
+            except Exception:
+                return self._send(400, json.dumps({"error": "file data must be base64"}))
+            if any(len(d) > 15_000_000 for _, d in files):
+                return self._send(413, json.dumps({"error": "file too large (15 MB max)"}))
+            res = check_uploaded(files, store.next_upload_id(), jev, jev_mode, vision)
+            store.upsert(res.to_dict())
+            return self._send(200, json.dumps(store.get(res.email_id), ensure_ascii=False))
+
         def do_POST(self):
             u = urlparse(self.path)
             n = int(self.headers.get("content-length") or 0)
@@ -71,6 +90,8 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto")
                 body = json.loads(self.rfile.read(n) or b"{}")
             except ValueError:
                 return self._send(400, json.dumps({"error": "invalid JSON"}))
+            if u.path == "/api/check":
+                return self._check(body)
             m = re.fullmatch(r"/api/cases/([^/]+)/review", u.path)
             if m:
                 try:
@@ -89,8 +110,8 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto")
     return H
 
 
-def serve(store: CaseStore, host: str = "127.0.0.1", port: int = 8000, inbox=None, jev=None, jev_mode: str = "auto"):
-    srv = ThreadingHTTPServer((host, port), make_handler(store, inbox, jev, jev_mode))
+def serve(store: CaseStore, host: str = "127.0.0.1", port: int = 8000, inbox=None, jev=None, jev_mode: str = "auto", vision=None):
+    srv = ThreadingHTTPServer((host, port), make_handler(store, inbox, jev, jev_mode, vision))
     print(f"Console: http://{host}:{port}   (Ctrl+C to stop)")
     try:
         srv.serve_forever()

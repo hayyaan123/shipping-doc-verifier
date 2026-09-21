@@ -167,3 +167,51 @@ def test_odd_pdf_layouts_small_run():
 
     s = run_oddpdf(Inbox(data), out_dir="out", limit=3, keep_samples=False)
     assert s["passed"] == s["cases"], [r for r in s["rows"] if r["passed"] < r["cases"]][:2]
+
+
+def test_upload_check_endpoint_and_function(tmp_path):
+    import base64
+    import json
+    import os
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    data = os.environ.get("SDV_DATA")
+    if not data:
+        return
+    from sdv.inbox import Inbox
+    from sdv.pipeline import check_uploaded
+
+    ib = Inbox(data)
+    e = next(x for x in ib.emails() if x["email_id"] == "email_001")
+    si, bl = [(a.split("/")[-1], ib.read_bytes(a)) for a in e["attachments"]]
+    assert check_uploaded([bl, si]).status == "OK"          # order does not matter: roles come from the content
+    assert check_uploaded([si]).review_reason == "missing_attachment"
+    tampered = (bl[0], bl[1].replace(b"MOORIM SP CO., LTD", b"OTHER TRADING LTD"))
+    r = check_uploaded([si, tampered])
+    assert r.status == "MISMATCH" and r.defect_fields == ["consignee"]
+
+    s = make_store(tmp_path)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def post(payload):
+        req = urllib.request.Request(base + "/api/check", data=json.dumps(payload).encode(), headers={"content-type": "application/json"}, method="POST")
+        return urllib.request.urlopen(req)
+
+    try:
+        ok = json.load(post({"files": [{"name": n, "data": base64.b64encode(b).decode()} for n, b in (si, tampered)]}))
+        assert ok["email_id"].startswith("upload_") and ok["status"] == "MISMATCH"
+        assert s.get(ok["email_id"]) is not None
+        for bad in ({"files": []}, {"files": [{"name": "a", "data": "!!!"}]}):
+            try:
+                post(bad)
+            except urllib.error.HTTPError as err:
+                assert err.code == 400
+                continue
+            raise AssertionError("expected 400")
+    finally:
+        srv.shutdown()
