@@ -108,6 +108,15 @@ Reviewers confirm, dismiss or clear each MISMATCH / NEEDS_REVIEW case; decisions
 
 Both are unverified against the organizers' definition of "cloud"; ask before the deadline.
 
+## Running on data it was not built on
+
+The 520-email set is a development sample. On real mail the risk is drift (new wording, layouts, formats), so every
+run writes `out/health.json` and prints a `[health]` summary: escalation rate against the development baseline (9%),
+Jev-vs-rules disagreements, unfamiliar field labels seen and how many could not be mapped, and processing failures.
+Warnings mean "the input no longer looks like the development data: read the escalations before trusting the rest".
+Model calls run in a small thread pool (4 workers) and are cached, so a re-run is cheap. When the organizers'
+server is available, `--submit` returns the official score, the only real measure on unseen data.
+
 ## Tests
 
 ```bash

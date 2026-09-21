@@ -18,7 +18,7 @@ from .readers import read_document
 from .triage import triage
 
 
-def _make_label_resolver(jev) -> Optional[Callable]:
+def _make_label_resolver(jev, log: Optional[list] = None) -> Optional[Callable]:
     if jev is None:
         return None
     from .jev import label_questions, label_state
@@ -26,9 +26,10 @@ def _make_label_resolver(jev) -> Optional[Callable]:
     def resolve(label: str, value: str) -> Optional[str]:
         ans = jev.ask(label_state(label, value), label_questions(label, value))
         got = jev.choice(ans, "field") if ans else None
-        if got and got[1] >= 0.8 and got[0] in FIELDS:
-            return got[0]
-        return None
+        out = got[0] if got and got[1] >= 0.8 and got[0] in FIELDS else None
+        if log is not None:
+            log.append({"label": label, "value": value[:60], "resolved_to": out})
+        return out
 
     return resolve
 
@@ -72,8 +73,11 @@ def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=N
             return res
         return _review(res, MISSING_ATTACHMENT, f"A comparison was requested but only {n_att} of 2 documents arrived.")
 
-    resolver = _make_label_resolver(jev) if jev_mode != "off" else None
+    resolutions: list = []
+    resolver = _make_label_resolver(jev, resolutions) if jev_mode != "off" else None
     records, texts = _load_docs(email, inbox, resolver)
+    if resolutions:
+        res.evidence["label_resolutions"] = resolutions
     res.evidence["documents"] = [
         {"name": r.name, "type": r.doc_type, "readable": r.readable, "error": r.error, "text_layer": r.text_layer} for r in records
     ]
@@ -187,21 +191,39 @@ def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool =
     return res
 
 
-def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = None, progress=None, vision=None) -> list:
+def _safe_process(email, inbox, jev, jev_mode, vision) -> EmailResult:
+    try:
+        return process_email(email, inbox, jev, jev_mode, vision)
+    except MissingDependency:
+        raise  # environment problem: stop loudly instead of producing wrong verdicts
+    except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
+        r = EmailResult(email_id=email["email_id"], subject=email.get("subject", ""))
+        r.category = "GENERAL"
+        r.error = f"{type(e).__name__}: {e}"
+        r.summary = f"Processing failed (retryable): {r.error}"
+        return r
+
+
+def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = None, progress=None, vision=None,
+                workers: Optional[int] = None) -> list:
+    """Process every email, in inbox order. Model calls are network-bound, so they run in a small thread pool."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    emails = inbox.emails()
+    if limit:
+        emails = emails[:limit]
+    if workers is None:
+        workers = 4 if (jev is not None and jev_mode != "off") or vision is not None else 1
     results = []
-    for n, email in enumerate(inbox.emails()):
-        if limit and n >= limit:
-            break
-        try:
-            results.append(process_email(email, inbox, jev, jev_mode, vision))
-        except MissingDependency:
-            raise  # environment problem: stop loudly instead of producing wrong verdicts
-        except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
-            r = EmailResult(email_id=email["email_id"], subject=email.get("subject", ""))
-            r.category = "GENERAL"
-            r.error = f"{type(e).__name__}: {e}"
-            r.summary = f"Processing failed (retryable): {r.error}"
+    if workers <= 1:
+        for n, email in enumerate(emails):
+            results.append(_safe_process(email, inbox, jev, jev_mode, vision))
+            if progress:
+                progress(n + 1)
+        return results
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for n, r in enumerate(pool.map(lambda e: _safe_process(e, inbox, jev, jev_mode, vision), emails)):
             results.append(r)
-        if progress:
-            progress(n + 1)
+            if progress:
+                progress(n + 1)
     return results

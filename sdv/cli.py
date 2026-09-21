@@ -117,6 +117,11 @@ def main(argv=None) -> int:
         print(f"[store] {len(results)} cases saved to {args.db}")
     write_submission(results, f"{args.out}/submission.json")
     print(text_report(results).split("\n\n")[0])
+    from .health import format_health, run_health, write_health
+
+    health = run_health(results, jev)
+    write_health(health, args.out)
+    print(format_health(health))
     if vision:
         print(f"[vision] model calls={vision.calls} cache hits={vision.cache_hits} failures={vision.failures}")
         if vision.last_error:
