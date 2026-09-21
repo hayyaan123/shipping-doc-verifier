@@ -18,3 +18,5 @@ Thumbs.db
 *serviceaccount*.json
 firebase-*.json
 *-adminsdk-*.json
+workspace/
+_to_delete/

@@ -48,19 +48,26 @@ def main(argv=None) -> int:
     od.add_argument("--jev", choices=["off", "auto", "all"], default="off")
     od.add_argument("--env", default=".env")
 
-    srv = sub.add_parser("serve", help="run the review console over a case store")
-    srv.add_argument("--db", default="out/cases.db")
+    srv = sub.add_parser("serve", help="run the backend API (batches: upload a folder / zip / link, process, review)")
+    srv.add_argument("--workdir", default="workspace", help="where batches (uploaded files + case databases) are kept")
+    srv.add_argument("--sample", default=None, help="folder of a bundled sample inbox, offered as a one-click batch")
+    srv.add_argument("--frontend", default=None, help="also serve the static frontend folder at / (convenience; it can be hosted apart)")
+    srv.add_argument("--cors-origin", default="*", help="origin allowed to call the API from a browser (the frontend's URL)")
+    srv.add_argument("--allow-private-urls", action="store_true",
+                     help="let 'link' batches read servers on private addresses (e.g. the hackathon docker on this machine)")
     srv.add_argument("--port", type=int, default=8000)
     srv.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept connections from other machines (containers, hosting)")
-    srv.add_argument("--data", default=None, help="optional: enables the console's Retry-failed button")
+    srv.add_argument("--max-batches", type=int, default=30)
     srv.add_argument("--jev", choices=["off", "auto", "all"], default="off")
     srv.add_argument("--vision", choices=["off", "auto", "vlm", "tesseract"], default="off",
-                     help="read image-only PDFs uploaded to the console as an unverified hint")
+                     help="read image-only PDFs as an unverified hint")
     srv.add_argument("--env", default=".env")
 
-    exp = sub.add_parser("export", help="write a read-only static console (index.html) for free hosting")
-    exp.add_argument("--db", default="out/cases.db")
-    exp.add_argument("--out", default="site")
+    bs = sub.add_parser("bootstrap", help="process the bundled sample into the workspace now (used at image build time)")
+    bs.add_argument("--workdir", default="workspace")
+    bs.add_argument("--sample", required=True)
+    bs.add_argument("--jev", choices=["off", "auto", "all"], default="off")
+    bs.add_argument("--env", default=".env")
 
     syn = sub.add_parser("sync", help="mirror the case store to / from Cloud Firestore")
     syn.add_argument("direction", choices=["push", "pull"])
@@ -83,6 +90,8 @@ def main(argv=None) -> int:
         return _audit(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "bootstrap":
+        return _bootstrap(args)
     if args.cmd == "oddpdf":
         from .oddpdf import format_summary, run_oddpdf
 
@@ -98,12 +107,6 @@ def main(argv=None) -> int:
         print(format_summary(run_stress(Inbox(args.data), args.out, args.limit, jev, args.jev)))
         if jev:
             print(f"[jev] live calls={jev.calls} cache hits={jev.cache_hits} failures={jev.failures}")
-        return 0
-    if args.cmd == "export":
-        from .console import export_static
-        from .store import CaseStore
-
-        print("wrote", export_static(CaseStore(args.db), args.out))
         return 0
     if args.cmd == "sync":
         return _sync(args)
@@ -184,18 +187,30 @@ def _audit(args) -> int:
 
 
 def _serve(args) -> int:
-    from .console import serve
-    from .store import CaseStore
+    from .api import Api, serve
+    from .workspace import Workspace
 
-    inbox = Inbox(args.data) if args.data else None
     jev = _jev(args.env) if args.jev != "off" else None
     vision = None
     if args.vision != "off":
         from .vision import VisionReader
 
         vision = VisionReader.from_env(args.env, args.vision)
-    serve(CaseStore(args.db), host=args.host, port=args.port, inbox=inbox, jev=jev, jev_mode=args.jev, vision=vision)
+    ws = Workspace(args.workdir, sample_dir=args.sample, max_batches=args.max_batches, allow_private_urls=args.allow_private_urls)
+    serve(Api(ws, jev, args.jev, vision, args.frontend, args.cors_origin), host=args.host, port=args.port)
     return 0
+
+
+def _bootstrap(args) -> int:
+    from .api import Api
+    from .workspace import Workspace
+
+    jev = _jev(args.env) if args.jev != "off" else None
+    api = Api(Workspace(args.workdir, sample_dir=args.sample), jev, args.jev)
+    api.bootstrap()
+    st = api.ws.store("sample").stats()
+    print(f"[bootstrap] sample processed: {st['emails']} emails")
+    return 0 if st["emails"] else 1
 
 
 def _sync(args) -> int:

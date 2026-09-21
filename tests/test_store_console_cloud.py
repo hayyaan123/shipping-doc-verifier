@@ -3,10 +3,8 @@ import threading
 import urllib.request
 
 from sdv.cloud import pull_decisions, push_cases
-from sdv.console import export_static, make_handler, render_index
 from sdv.store import CaseStore
 
-from http.server import ThreadingHTTPServer
 
 
 def case(eid, status="NEEDS_REVIEW", cat="BL_COMPARISON", error=None):
@@ -47,32 +45,6 @@ def test_upsert_keeps_decision_when_case_is_reprocessed(tmp_path):
     s.review("e3", "dismissed")
     s.upsert(case("e3", "MISMATCH"))
     assert s.get("e3")["review"]["decision"] == "dismissed"
-
-
-def test_static_export_cannot_break_out_of_script_tag(tmp_path):
-    s = make_store(tmp_path)
-    path = export_static(s, str(tmp_path / "site"))
-    html = open(path, encoding="utf-8").read()
-    assert "window.__SNAPSHOT__" in html
-    assert "Subj e1 </script>" not in html  # escaped as <\/script>
-    assert "__SNAPSHOT__*/" not in html
-
-
-def test_http_api_round_trip(tmp_path):
-    s = make_store(tmp_path)
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_address[1]}"
-    try:
-        rows = json.load(urllib.request.urlopen(base + "/api/cases?status=MISMATCH"))
-        assert [r["email_id"] for r in rows] == ["e3"]
-        req = urllib.request.Request(base + "/api/cases/e3/review", data=json.dumps({"decision": "confirmed_defect"}).encode(),
-                                     headers={"content-type": "application/json"}, method="POST")
-        assert json.load(urllib.request.urlopen(req))["review"]["decision"] == "confirmed_defect"
-        assert json.load(urllib.request.urlopen(base + "/api/stats"))["decided"] == 1
-        assert "Shipping Desk" in urllib.request.urlopen(base + "/").read().decode()
-    finally:
-        srv.shutdown()
 
 
 class FakeDoc:
@@ -192,26 +164,3 @@ def test_upload_check_endpoint_and_function(tmp_path):
     tampered = (bl[0], bl[1].replace(b"MOORIM SP CO., LTD", b"OTHER TRADING LTD"))
     r = check_uploaded([si, tampered])
     assert r.status == "MISMATCH" and r.defect_fields == ["consignee"]
-
-    s = make_store(tmp_path)
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_address[1]}"
-
-    def post(payload):
-        req = urllib.request.Request(base + "/api/check", data=json.dumps(payload).encode(), headers={"content-type": "application/json"}, method="POST")
-        return urllib.request.urlopen(req)
-
-    try:
-        ok = json.load(post({"files": [{"name": n, "data": base64.b64encode(b).decode()} for n, b in (si, tampered)]}))
-        assert ok["email_id"].startswith("upload_") and ok["status"] == "MISMATCH"
-        assert s.get(ok["email_id"]) is not None
-        for bad in ({"files": []}, {"files": [{"name": "a", "data": "!!!"}]}):
-            try:
-                post(bad)
-            except urllib.error.HTTPError as err:
-                assert err.code == 400
-                continue
-            raise AssertionError("expected 400")
-    finally:
-        srv.shutdown()

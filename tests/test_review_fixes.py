@@ -258,28 +258,6 @@ def test_retry_failed_survives_another_failure_and_passes_vision(tmp_path):
     assert retry_failed(s, Down(), None, "off", vision=None)["still_failing"] == 1
 
 
-def test_console_host_option_and_request_cap(tmp_path):
-    import threading
-    import urllib.error
-    import urllib.request
-    from http.server import ThreadingHTTPServer
-
-    from sdv.cli import main  # noqa: F401  (imports cleanly with the new --host option)
-    from sdv.console import make_handler
-
-    s = CaseStore(str(tmp_path / "h.db"))
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}/api/check", data=b"{}",
-                                 headers={"content-length": "80000000"}, method="POST")
-    try:
-        urllib.request.urlopen(req, timeout=5)
-        raise AssertionError("expected 413")
-    except (urllib.error.HTTPError, ConnectionError, OSError) as e:
-        assert getattr(e, "code", 413) == 413
-    srv.shutdown()
-
-
 def test_jev_cache_dir_can_come_from_the_environment(tmp_path, monkeypatch):
     from sdv.jev import JevClient
 
@@ -300,7 +278,7 @@ def test_console_can_process_the_inbox_with_live_progress(tmp_path):
     s = CaseStore(str(tmp_path / "r.db"))
     s.upsert({"email_id": "stale_1", "subject": "old", "category": "GENERAL", "status": "OK", "comparisons": [], "evidence": {}})
     s.upsert({"email_id": "upload_001", "subject": "kept", "category": "BL_COMPARISON", "status": "OK", "comparisons": [], "evidence": {}})
-    r = Runner(s, Inbox(str(tmp_path / "data")), None, "off", None)
+    r = Runner(s, lambda: Inbox(str(tmp_path / "data")), None, "off", None)
     assert r.start(fresh=True) is True
     for _ in range(100):
         if not r.status()["running"]:

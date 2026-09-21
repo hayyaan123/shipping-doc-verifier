@@ -7,12 +7,14 @@ from pathlib import Path
 
 
 class Inbox:
-    def __init__(self, source: str):
+    def __init__(self, source: str, opener=None):
+        self.opener = opener  # e.g. one that refuses redirects to private addresses
         self.source = str(source).rstrip("/")
         self.is_http = self.source.startswith(("http://", "https://"))
 
     def _get(self, path: str) -> bytes:
-        with urllib.request.urlopen(self.source + path, timeout=60) as r:
+        opener = self.opener.open if self.opener else urllib.request.urlopen
+        with opener(self.source + path, timeout=60) as r:
             return r.read()
 
     def emails(self) -> list:

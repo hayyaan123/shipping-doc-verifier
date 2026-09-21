@@ -10,14 +10,37 @@ escalated to a human instead of guessed.
 ```bash
 git clone https://github.com/hayyaan123/shipping-doc-verifier && cd shipping-doc-verifier
 pip install -r requirements.txt                    # Python 3.10+
-# The synthetic sample inbox (520 emails) is bundled in demo/data. No key needed for a first run:
-python -m sdv run --data demo/data --out out --jev off --db out/cases.db
-python -m sdv serve --db out/cases.db --data demo/data      # console at http://127.0.0.1:8000
+python -m sdv serve --workdir workspace --sample demo/data --frontend frontend
+# open http://127.0.0.1:8000  ->  drop a folder, a .zip or a link on the home page
 ```
 
+The app is two separate parts: a **backend** (`sdv/`, a JSON API) and a **frontend** (`frontend/`, plain static
+files that only talk to that API). `--frontend frontend` is a convenience that lets the backend also serve the static
+files; they can equally be hosted apart (see "Architecture and hosting").
 Or with Docker: `docker compose up --build` and open http://localhost:7860.
-A live copy runs on a free cloud host (see "Hosting the console publicly"); its link is in the submission form.
-Jev is optional: put `TYPESAFE_API_KEY=...` in `.env` (copy `.env.example`) to turn it on.
+A live copy runs on a free cloud host (see "Hosting"); its link is in the submission form.
+Jev is optional: put `TYPESAFE_API_KEY=...` in `.env` (copy `.env.example`) and add `--jev all` to turn it on.
+The command-line pipeline still exists for batch runs: `python -m sdv run --data demo/data --out out --jev off`.
+
+## Using it
+
+On the home page choose where the emails come from. Each source becomes a **batch** with its own page, progress bar,
+case list, reviewer decisions and downloadable `submission.json`.
+
+- **A folder** (drag it in, or "Choose folder"): the bundle layout, i.e. a folder that contains `inbox/email_*.json`
+  and `attachments/`. The browser sends the files in small chunks with their relative paths.
+- **A .zip** of that folder.
+- **A link**: either a `.zip` URL, or the base URL of a server that answers `GET /emails` (the hackathon's docker
+  server). Addresses on private networks are refused (SSRF guard) unless the backend runs with `--allow-private-urls`,
+  which is what you want when the organizers' docker is on the same machine.
+- **The bundled sample** (520 synthetic emails), one click.
+- **Check two documents**: drop an SI and a draft BL (any order, PDF / Word / Excel / text); the verdict appears at once.
+
+A folder without an `inbox/` is refused with an explanation, never silently processed as "0 emails". Processing runs
+in the background (so the page shows live progress), each email is saved as it finishes, a failed email is a retryable
+failure (never a verdict), and "Process again" re-runs a batch. Reviewers confirm, dismiss or clear each MISMATCH /
+NEEDS_REVIEW case; decisions survive a re-run. Uploads are size- and count-limited, zip paths are sanitised (no
+zip-slip, no zip bombs), and at most 30 batches are kept (oldest pruned).
 
 ## How it works
 
@@ -31,7 +54,7 @@ email (subject, body, attachments)
        compare per field: match / mismatch / uncertain
        every claimed mismatch is re-read by a second, independent extraction path
        anything unverifiable -> NEEDS_REVIEW with one of 4 reasons, for a person to decide
-  -> submission JSON + case store + review console
+  -> submission JSON + per-batch case store + review UI
 ```
 
 ## Principles
@@ -70,7 +93,10 @@ email (subject, body, attachments)
 | `sdv/pipeline.py` | Orchestration; per-email failures are captured, not fatal |
 | `sdv/report.py`, `submission.py` | `results.json`, `report.txt`, `report.html`, submission JSON |
 | `sdv/store.py` | SQLite case store; reviewer decisions; failed cases are retryable and distinct from verdicts |
-| `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
+| `sdv/api.py` | Backend JSON API (batches, files, run, cases, review, submission, two-document check), CORS, optional static frontend |
+| `sdv/workspace.py` | Batches on disk: folder / zip / link intake, path and zip safety, SSRF guard, limits |
+| `sdv/runner.py` | Background job per batch (preparing, processing, done / error) with live progress |
+| `frontend/` | Separate static frontend (plain HTML / CSS / JS); `config.js` says where the API lives |
 | `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
 | `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift, plus layout / combined: a defect AND a layout quirk at once) |
 | `sdv/columns.py` | The one rule, shared by both extraction paths, for where a value ends and for a value on the line below |
@@ -109,7 +135,7 @@ Jev decides *what kind of thing this is*. Code decides *whether two values match
 
 Image-only PDFs have no text to verify, so the case is still escalated as `NEEDS_REVIEW` / `unreadable`.
 With `--vision`, an open-weights vision model (or local Tesseract) transcribes the scan and the case gets an
-**unverified reading** in the console ("the scan reading differs in: Consignee - may be a misread"), so the
+**unverified reading** in the case view ("the scan reading differs in: Consignee - may be a misread"), so the
 reviewer knows where to look first. It never changes the status, reason or defect fields.
 
 ```bash
@@ -126,34 +152,32 @@ characters ("PTE" as "FTE"). Neither is reliable enough to decide a verdict, whi
 reading is only a hint. Hints tolerate this kind of scan noise (a separator slip or spacing is "uncertain", not a
 "difference").
 
-## Review console and case store
+## API
 
-```bash
-python -m sdv run --data path/to/bundle --out out --jev auto --db out/cases.db
-python -m sdv serve --db out/cases.db --data path/to/bundle     # http://127.0.0.1:8000
-```
+All under `/api`; JSON in and out. `{id}` is a batch id, `{eid}` an email id.
 
-Reviewers confirm, dismiss or clear each MISMATCH / NEEDS_REVIEW case; decisions survive a re-run.
+| Route | Purpose |
+| --- | --- |
+| `GET /health`, `GET /config` | liveness; server limits and modes |
+| `GET /batches`, `POST /batches` | list; create (`{"name", "source": {"type": "upload" or "url" or "sample", "url": ...}}`) |
+| `GET /batches/{id}`, `DELETE /batches/{id}` | batch, its stats and job state; delete |
+| `POST /batches/{id}/files` | multipart upload (files + a `paths` JSON field with relative paths), or a `.zip` |
+| `POST /batches/{id}/run`, `/retry` | process (again); re-run only failed cases |
+| `GET /batches/{id}/status` | job phase and progress |
+| `GET /batches/{id}/cases?view=summary&status=&category=&q=&pending=` | filtered list |
+| `GET /batches/{id}/cases/{eid}`, `POST .../review` | one case in full; confirm / dismiss / clear |
+| `GET /batches/{id}/submission`, `/results` | the submission JSON; the full results |
+| `POST /batches/{id}/check` | two documents (base64) checked at once and saved as a case |
 
-**Process inbox.** The header button (live console started with `--data`) clears the processed cases and runs the whole
-pipeline over the attached inbox, saving each email as it finishes, so the list fills up with a live progress count.
-Uploaded checks and reviewer decisions are kept. The 520 sample emails take about a second without model calls.
-
-**Check two documents.** The console's top panel takes two files (PDF, Word, Excel or text, in any order), works out
-which is the Shipping Instruction and which is the draft BL from their contents, and shows the same field-by-field
-verdict. Each check is saved as a case (`upload_001`, ...). Start the server with `--jev all --vision auto` so
-uploaded scans also get the AI reading hint. Uploads work only in the live console, not in the static export.
-`--data` on `serve` enables "Retry failed" (re-runs only cases that failed processing).
+Each batch keeps its own SQLite case database (`CaseStore`) next to its uploaded files in `--workdir`.
 
 ## Cloud (free tier, no credit card)
 
-- **Hosted console: Render free web service**, built from the `Dockerfile` (see "Hosting the console publicly").
-  This is the public, working prototype.
+- **Hosted backend + frontend: Render free web service**, built from the `Dockerfile` (see "Hosting"). This is the
+  public, working prototype.
 - **Optional: Cloud Firestore (Spark plan)** as a durable case store, so reviewer decisions survive container
-  restarts. Setup steps are in the docstring of `sdv/cloud.py`; `python -m sdv sync push --db out/cases.db` uploads and
-  `sync pull` brings decisions back. Not exercised against a live project yet.
-- **Read-only snapshot:** `python -m sdv export --db out/cases.db --out site` writes a static console (any static
-  host). It has no upload check, so it is not the live prototype.
+  restarts. Setup steps are in the docstring of `sdv/cloud.py`; `python -m sdv sync push --db <batch>/cases.db`
+  uploads and `sync pull` brings decisions back. Not exercised against a live project yet.
 
 ## Running on data it was not built on
 
@@ -178,12 +202,21 @@ read as the container count, empty parentheses left by a dropped CJK font breaki
 extraction path not following a value on the line below its label. All were fixed generally (not per file). After the
 fixes: 2,520/2,520 on 30 emails. These layouts are ones we thought of, so they are evidence of robustness, not proof.
 
-## Hosting the console publicly (free)
+## Architecture and hosting
 
-The hackathon requires a public, working prototype. The repo ships a `Dockerfile`, `docker-compose.yml` and a
-`render.yaml` blueprint. The image processes the bundled sample inbox (`demo/data`, synthetic) into a case database at
-build time and serves the console, including the two-document upload check, on `$PORT`. Jev and the vision model are
-OFF on a public copy (uploads use rules only), so nobody can spend your credits; set `SDV_JEV=auto` and a
+```
+browser  --(static files)-->  frontend/  (any static host, or served by the backend)
+browser  --(fetch, JSON)--->  backend API (sdv serve)  -->  workspace/<batch>/{data/, cases.db}
+                                    |--> Jev (optional), vision model (optional)
+```
+
+The frontend knows the backend only through `frontend/config.js` (`window.SDV_API`) or a `?api=https://backend` address
+parameter, so it can live on a different host (GitHub Pages, Netlify, Vercel: just publish the `frontend` folder). Then
+start the backend with `--cors-origin https://your-frontend` (default `*`).
+
+The repo ships a `Dockerfile`, `docker-compose.yml` and a `render.yaml` blueprint. The image processes the bundled
+sample inbox (`demo/data`, synthetic) at build time and serves the API and the frontend on `$PORT`. Jev and the vision
+model are OFF on a public copy (uploads use rules only), so nobody can spend your credits; set `SDV_JEV=auto` and a
 `TYPESAFE_API_KEY` secret to change that.
 
 ```bash
@@ -192,24 +225,25 @@ docker compose up --build     # http://localhost:7860
 
 Render (free web service, no card): New > Web Service > Public Git Repository > this repo > Runtime Docker > Free.
 A free service sleeps after 15 minutes without traffic (about a minute to wake); a free uptime pinger on
-`/api/stats` every 5 minutes keeps it awake. If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before
-building, the hosted console shows the classifications made with Jev and still needs no key. A hosted copy keeps
-reviewer decisions only until the container restarts.
+`/api/health` every 5 minutes keeps it awake. If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before
+building, the hosted sample shows the classifications made with Jev and still needs no key. Free hosts have temporary
+disk: uploaded batches and reviewer decisions last until the container restarts (Firestore sync is the durable option).
+There is no login on the API; for a private deployment put it behind the host's access control.
 
 ## Scaling and limits
 
 The unit of work is one email and emails are independent, so a run parallelises trivially: `process_all` already uses
 a worker pool for model calls, and the pipeline itself is CPU-light (520 emails in about a second without models).
 Model answers are cached by content, so a re-run costs nothing. At the volume the brief mentions (about 2,000 emails a
-day) one small container is enough for the pipeline. What would change first: the console's built-in HTTP server and
-SQLite case store are fine for a team of reviewers, but a larger deployment would put a real web server and a hosted
+day) one small container is enough for the pipeline. What would change first: the API's built-in HTTP server and
+SQLite case stores are fine for a team of reviewers, but a larger deployment would put a real web server and a hosted
 database (Firestore or Postgres) behind the same `CaseStore` interface. Scans need a vision model or OCR; until one is
 configured they are handed to a person, never guessed.
 
 ## Tests
 
 ```bash
-python -m pytest -q                            # 70 tests
+python -m pytest -q                            # 78 tests
 SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data test
 ```
 
@@ -221,7 +255,7 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
 | Stress test: 51 verified-clean emails, 3,213 controlled edits | `stress` | 100% in every class: benign 306 stay OK; defects 459 caught on exactly the edited field; blanks and removals 357 escalated; missing attachment, wrong document, corrupt PDF 153 escalated; unfamiliar labels 255 never a false mismatch; layout quirks 255 stay OK; defect plus layout quirk at the same time 1,326 caught; empty label followed by a measurement 102 escalated |
 | Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf --limit 30` | 2,520/2,520 (see "Odd-PDF test") |
-| Unit and regression tests | `pytest` | 70 pass |
+| Unit and regression tests (incl. API upload / zip / link / hostile-path tests) | `pytest` | 78 pass |
 
 Read these with care:
 

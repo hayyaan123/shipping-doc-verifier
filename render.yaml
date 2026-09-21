@@ -5,7 +5,7 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /api/stats
+    healthCheckPath: /api/health
     envVars:
       - key: SDV_JEV
         value: "off"

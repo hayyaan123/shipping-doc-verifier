@@ -1,5 +1,5 @@
 services:
-  console:
+  app:
     build: .
     ports:
       - "7860:7860"
@@ -7,5 +7,6 @@ services:
       # Off by default. To let uploads use Jev / the vision model, set the keys here or in a .env file.
       SDV_JEV: "off"        # off | auto | all
       SDV_VISION: "off"     # off | auto | vlm
+      # SDV_ALLOW_PRIVATE_URLS: "1"   # let "link" batches read a server on this machine (e.g. the hackathon docker)
       # TYPESAFE_API_KEY: ...
       # VISION_API_KEY: ...
