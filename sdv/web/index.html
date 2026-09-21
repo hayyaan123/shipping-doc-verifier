@@ -122,6 +122,11 @@ function detail(){
     }
     const docs = c.evidence?.documents || [];
     if (docs.length) h += `<h3>Documents</h3>` + docs.map(d => `<div class="note"><code>${esc(d.name)}</code> · read as <b>${esc(d.type)}</b>${d.readable?"":` · <span class="v-uncertain">${esc(d.error)}</span>`}</div>`).join("");
+    const sr = c.evidence?.scan_reading;
+    if (sr){
+      h += `<h3>Scan reading (unverified)</h3><div class="note">${esc(sr.summary || "The scan was read, but no comparison was possible.")}</div>` +
+        (sr.documents||[]).map(d => `<div class="note"><code>${esc(d.name)}</code> · ${esc(d.engine)}<br>` + Object.entries(d.fields).map(([k,v]) => `${esc(LABEL[k]||k)}: <b>${esc(v)}</b>`).join("<br>") + `</div>`).join("");
+    }
     if (c.status !== "OK"){
       h += `<h3>Decision</h3>`;
       if (c.review) h += `<div class="note"><b>${esc(c.review.decision.replace("_"," "))}</b>${c.review.note?` — ${esc(c.review.note)}`:""}</div>`;

@@ -52,7 +52,7 @@ def _load_docs(email: dict, inbox, resolver):
     return records, texts
 
 
-def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto") -> EmailResult:
+def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=None) -> EmailResult:
     eid = email["email_id"]
     res = EmailResult(email_id=eid, subject=email.get("subject", ""))
     tri = triage(email, jev, jev_mode)
@@ -99,6 +99,8 @@ def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto") -> Email
 
     if reasons:
         reason = next(k for k in REVIEW_PRIORITY if k in reasons)
+        if vision is not None and reason == UNREADABLE:
+            _scan_hint(res, email, inbox, records, texts, vision, resolver)
         return _review(res, reason, reasons[reason])
 
     si_rec, bl_rec = si[0], bl[0]
@@ -134,6 +136,43 @@ def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto") -> Email
     return res
 
 
+def _scan_hint(res: EmailResult, email: dict, inbox, records: list, texts: list, vision, resolver) -> None:
+    """Attach an UNVERIFIED reading of image-only PDFs. Never touches status, reason or defect fields."""
+    from .extract import extract_fields
+    from .models import DocRecord
+
+    hint_records, shown = list(records), []
+    for i, (rec, txt) in enumerate(zip(records, texts)):
+        if rec.readable or "no text layer" not in (rec.error or ""):
+            continue
+        try:
+            lines = vision.read(inbox.read_bytes(email["attachments"][i]))
+        except Exception:
+            lines = None
+        if not lines:
+            continue
+        fields = extract_fields(lines, rec.name, "vision", resolver)
+        dtype = detect_doc_type(lines)
+        hint_records[i] = DocRecord(name=rec.name, doc_type=dtype, readable=True, kind="pdf", text_layer=False, fields=fields)
+        shown.append({"name": rec.name, "read_as": dtype, "engine": vision.last_engine,
+                      "fields": {f: v.raw for f, v in fields.items() if v.found and not v.blank}})
+    if not shown:
+        return
+    si = [r for r in hint_records if r.readable and r.doc_type == DOC_SI]
+    bl = [r for r in hint_records if r.readable and r.doc_type == DOC_BL]
+    hint = {"unverified": True, "documents": shown, "preview": []}
+    if len(si) == 1 and len(bl) == 1:
+        comps = compare_docs(si[0], bl[0])
+        hint["preview"] = [{"field": c.field, "verdict": c.verdict, "si_value": c.si_value, "bl_value": c.bl_value}
+                           for c in comps if c.verdict != MATCH]
+        diff = [label_for(c.field) for c in comps if c.verdict == MISMATCH]
+        hint["summary"] = (
+            "The scan reading differs from the other document in: " + ", ".join(diff)
+            + ". Scan reading is error-prone, so this may be a misread; check the image before treating it as a defect."
+            if diff else "The scan reading found no difference, but it is unverified; a person still has to confirm.")
+    res.evidence["scan_reading"] = hint
+
+
 def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool = False) -> EmailResult:
     res.status = NEEDS_REVIEW
     res.review_reason = reason
@@ -147,13 +186,13 @@ def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool =
     return res
 
 
-def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = None, progress=None) -> list:
+def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = None, progress=None, vision=None) -> list:
     results = []
     for n, email in enumerate(inbox.emails()):
         if limit and n >= limit:
             break
         try:
-            results.append(process_email(email, inbox, jev, jev_mode))
+            results.append(process_email(email, inbox, jev, jev_mode, vision))
         except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
             r = EmailResult(email_id=email["email_id"], subject=email.get("subject", ""))
             r.category = "GENERAL"

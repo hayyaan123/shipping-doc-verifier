@@ -24,6 +24,8 @@ def main(argv=None) -> int:
     run.add_argument("--env", default=".env", help="path to the git-ignored env file holding the Jev key")
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--submit", action="store_true", help="POST the submission to /submit (needs an http:// --data)")
+    run.add_argument("--vision", choices=["off", "auto", "vlm", "tesseract"], default="off",
+                     help="read image-only PDFs as a reviewer hint (never changes a verdict)")
     run.add_argument("--db", default=None, help="also save every case into this SQLite case store (e.g. out/cases.db)")
 
     aud = sub.add_parser("audit", help="ask Jev about every email and compare with the rule tier (validation evidence)")
@@ -89,7 +91,14 @@ def main(argv=None) -> int:
             print("[jev] no key found; using cached answers if any, otherwise the rule tier.", file=sys.stderr)
 
     t0 = time.time()
-    results = process_all(inbox, jev, args.jev, args.limit)
+    vision = None
+    if args.vision != "off":
+        from .vision import VisionReader
+
+        vision = VisionReader.from_env(args.env, args.vision)
+        if not vision.available():
+            print("[vision] no VISION_API_KEY and no tesseract found; scans stay unread", file=sys.stderr)
+    results = process_all(inbox, jev, args.jev, args.limit, vision=vision)
     write_outputs(results, args.out)
     if args.db:
         from .store import CaseStore
@@ -99,6 +108,8 @@ def main(argv=None) -> int:
         print(f"[store] {len(results)} cases saved to {args.db}")
     write_submission(results, f"{args.out}/submission.json")
     print(text_report(results).split("\n\n")[0])
+    if vision:
+        print(f"[vision] model calls={vision.calls} cache hits={vision.cache_hits} failures={vision.failures}")
     if jev:
         print(f"[jev] live calls={jev.calls} cache hits={jev.cache_hits} failures={jev.failures}"
               + (f" | disabled: {jev.disabled_reason}" if jev.disabled_reason else ""))

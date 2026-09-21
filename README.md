@@ -37,6 +37,7 @@ escalated to a human instead of guessed.
 | `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
 | `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
 | `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift) |
+| `sdv/vision.py` | Open-weights vision model / Tesseract that reads scanned PDFs as an unverified reviewer hint |
 | `sdv/cloud.py` | Mirror cases and decisions to Cloud Firestore |
 
 ## Run
@@ -65,6 +66,21 @@ python -m sdv run --data path/to/bundle --out out --jev all
 3. **Audit and stress** (`python -m sdv audit`): asks Jev about every email and reports every disagreement with the rules.
 
 Jev decides *what kind of thing this is*. Code decides *whether two values match*.
+
+## Reading scanned documents (vision model)
+
+Image-only PDFs have no text to verify, so the case is still escalated as `NEEDS_REVIEW` / `unreadable`.
+With `--vision`, an open-weights vision model (or local Tesseract) transcribes the scan and the case gets an
+**unverified reading** in the console ("the scan reading differs in: Consignee - may be a misread"), so the
+reviewer knows where to look first. It never changes the status, reason or defect fields.
+
+```bash
+# .env:  VISION_API_KEY=hf_...   (free Hugging Face token; optional VISION_MODEL, VISION_BASE_URL)
+python -m sdv run --data path/to/bundle --out out --vision auto --db out/cases.db
+```
+
+`auto` uses the vision model when a key is set and Tesseract otherwise. On the 3 scanned pairs, Tesseract misreads
+characters ("PTE" as "FTE", "(M)" as "(MM)"), which is exactly why a scan is never trusted for a verdict.
 
 ## Review console and case store
 
@@ -107,4 +123,4 @@ Read these with care:
 - The stress edits were written by us, so they test the behaviours we thought of. They do not replace real
   variation such as new layouts, OCR noise on scans, or other languages.
 - Scanned PDFs (no text layer) are escalated as `unreadable`; no OCR verdict is trusted.
-- With `stress --jev auto`, Jev resolved 250 of the 255 unfamiliar-label cases to the correct OK (the edit only renamed a label); the other 5 (notify party, 'Also Advise') were escalated to a person rather than guessed. Rules alone escalated all 255.
+- `stress --jev auto` measures how many unfamiliar labels Jev can resolve instead of escalating.
