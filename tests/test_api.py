@@ -154,6 +154,50 @@ def test_hostile_paths_and_zips_stay_inside_the_batch(tmp_path):
         pass
 
 
+def test_an_email_cannot_name_an_attachment_outside_its_bundle(tmp_path):
+    """The email files come from whoever uploaded the batch, so the attachment NAMES in them are hostile input.
+    A name that climbs out of the bundle must not be read, and nothing from outside may reach a verdict."""
+    from sdv.inbox import Inbox
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("BILL OF LADING (DRAFT)\nConsignee: TOP-SECRET-VALUE\nShipper: ALSO-SECRET\n"
+                      "Port of Loading: X\nPort of Discharge: Y\nNo. of Containers: 1 x 20GP\nGross Weight (KG): 5 KG\n",
+                      encoding="utf-8")
+    si = ("SHIPPING INSTRUCTION\nConsignee: B\nShipper: A\nPort of Loading: X\nPort of Discharge: Y\n"
+          "No. of Containers: 1 x 20GP\nGross Weight (KG): 5 KG\n").encode()
+    email = {"email_id": "evil_001", "subject": "REQUEST BL DRAFT",
+             "body": "Attached are the SI and draft BL. Please check.",
+             "attachments": ["attachments/e_SI.txt", "../secret.txt"]}
+
+    # 1. the reader itself refuses to leave the bundle, however the path is written
+    bundle = tmp_path / "bundle"
+    (bundle / "inbox").mkdir(parents=True)
+    (bundle / "attachments").mkdir()
+    (bundle / "inbox" / "email_001.json").write_text(json.dumps(email), encoding="utf-8")
+    (bundle / "attachments" / "e_SI.txt").write_bytes(si)
+    ib = Inbox(str(bundle))
+    for bad in ["../secret.txt", "../../secret.txt", "attachments/../../secret.txt", str(secret), "/etc/passwd"]:
+        try:
+            ib.read_bytes(bad)
+            raise AssertionError(f"expected a refusal for {bad!r}")
+        except ValueError:
+            pass
+    assert ib.read_bytes("attachments/e_SI.txt") == si  # ordinary paths still work
+
+    # 2. end to end: such an email becomes a failed case, and no outside content reaches the results
+    api, srv, base = start(tmp_path)
+    bid = call(base, "POST", "/api/batches", {"source": {"type": "upload"}})[1]["id"]
+    upload(base, bid, [("b/inbox/email_001.json", json.dumps(email).encode()),
+                       ("b/attachments/e_SI.txt", si)])
+    assert call(base, "POST", f"/api/batches/{bid}/run", {})[0] == 200
+    v = wait_done(base, bid)
+    assert v["state"] == "done" and not v["job"]["error"]
+    rows = call(base, "GET", f"/api/batches/{bid}/cases")[1]
+    assert len(rows) == 1 and rows[0]["error"]           # recorded as a processing failure, not a verdict
+    assert not rows[0]["comparisons"]
+    assert "SECRET" not in json.dumps(rows)
+
+
 def test_limits_and_bad_ids(tmp_path):
     api, srv, base = start(tmp_path, max_file_bytes=100, max_files=3)
     bid = call(base, "POST", "/api/batches", {"source": {"type": "upload"}})[1]["id"]

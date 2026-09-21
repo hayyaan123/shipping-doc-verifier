@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from pathlib import Path
+
+_ESCAPE = re.compile(r"(^|/)\.\.(/|$)")
 
 
 class Inbox:
@@ -42,9 +45,21 @@ class Inbox:
         return iter(self.emails())
 
     def read_bytes(self, att_path: str) -> bytes:
+        """Read one attachment named by the email file.
+
+        That name is NOT trusted: on a hosted copy the email files come from whatever bundle a stranger
+        uploaded, so a name like "../../../etc/passwd" must not be followed. A local read is confined to the
+        bundle folder and anything that leaves it is refused (the pipeline records that as a failed case).
+        """
         if self.is_http:
+            if _ESCAPE.search(str(att_path).replace("\\", "/")):
+                raise ValueError(f"attachment path leaves the inbox: {att_path!r}")
             return self._get("/" + att_path.lstrip("/"))
-        return (Path(self.source) / att_path).read_bytes()
+        base = Path(self.source).resolve()
+        target = (base / att_path).resolve()
+        if target != base and base not in target.parents:
+            raise ValueError(f"attachment path leaves the bundle folder: {att_path!r}")
+        return target.read_bytes()
 
     def submit(self, submission: dict) -> dict:
         if not self.is_http:

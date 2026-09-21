@@ -258,6 +258,29 @@ def test_retry_failed_survives_another_failure_and_passes_vision(tmp_path):
     assert retry_failed(s, Down(), None, "off", vision=None)["still_failing"] == 1
 
 
+def test_retry_does_not_die_on_an_email_file_with_no_id(tmp_path):
+    """A batch can hold an email file too broken to carry an email_id. The run stores it under a fallback id;
+    "Retry failed" must not raise on it, or one bad file would block retrying every other failure."""
+    from sdv.store import retry_failed
+
+    class Mixed:
+        def emails(self):
+            return [{},           # no email_id at all
+                    [1, 2, 3],        # valid JSON, but not an object
+                    {"email_id": "e2", "subject": "s", "body": "Please check the draft BL against the SI",
+                     "attachments": ["a_SI.txt", "a_BL.txt"]}]
+
+        def read_bytes(self, p):
+            raise ConnectionResetError("down")
+
+    s = CaseStore(str(tmp_path / "m.db"))
+    for k, e in enumerate(Mixed().emails()):
+        s.upsert(_safe_process(e, Mixed(), None, "off", None, f"malformed_{k + 1:04d}").to_dict())
+    assert {r["email_id"] for r in s.failed()} == {"malformed_0001", "malformed_0002", "e2"}
+    out = retry_failed(s, Mixed(), None, "off", vision=None)  # must not raise KeyError / AttributeError
+    assert out["retried"] == 3 and out["still_failing"] == 3
+
+
 def test_jev_cache_dir_can_come_from_the_environment(tmp_path, monkeypatch):
     from sdv.jev import JevClient
 

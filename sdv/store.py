@@ -151,9 +151,13 @@ def retry_failed(store: CaseStore, inbox, jev=None, jev_mode: str = "auto", visi
 
     wanted = {r["email_id"] for r in store.failed()}
     fixed = still = 0
-    for email in inbox.emails():
-        if email["email_id"] in wanted:
-            res = _safe_process(email, inbox, jev, jev_mode, vision)
+    # An email file can be too broken to even carry an email_id (or to be an object at all); the run stored it
+    # under a fallback id made from its position, so number them the same way rather than assume the shape.
+    for k, email in enumerate(inbox.emails()):
+        fallback = f"malformed_{k + 1:04d}"
+        eid = email.get("email_id") if isinstance(email, dict) else None
+        if (eid or fallback) in wanted:
+            res = _safe_process(email, inbox, jev, jev_mode, vision, fallback)
             store.upsert(res.to_dict())
             fixed, still = (fixed + 1, still) if not res.error else (fixed, still + 1)
     return {"retried": fixed + still, "recovered": fixed, "still_failing": still}

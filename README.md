@@ -243,7 +243,7 @@ configured they are handed to a person, never guessed.
 ## Tests
 
 ```bash
-python -m pytest -q                            # 78 tests
+python -m pytest -q                            # 80 tests
 SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data test
 ```
 
@@ -255,7 +255,7 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
 | Stress test: 51 verified-clean emails, 3,213 controlled edits | `stress` | 100% in every class: benign 306 stay OK; defects 459 caught on exactly the edited field; blanks and removals 357 escalated; missing attachment, wrong document, corrupt PDF 153 escalated; unfamiliar labels 255 never a false mismatch; layout quirks 255 stay OK; defect plus layout quirk at the same time 1,326 caught; empty label followed by a measurement 102 escalated |
 | Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf --limit 30` | 2,520/2,520 (see "Odd-PDF test") |
-| Unit and regression tests (incl. API upload / zip / link / hostile-path tests) | `pytest` | 78 pass |
+| Unit and regression tests (incl. API upload / zip / link / hostile-path / attachment-escape tests) | `pytest` | 80 pass |
 
 Read these with care:
 

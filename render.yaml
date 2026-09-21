@@ -7,7 +7,9 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
+      # "all" serves the pre-computed answers in demo/jev_cache (no key on the host, so no credits can be
+      # spent: an uncached question simply falls back to the rule tier). "off" would hide them.
       - key: SDV_JEV
-        value: "off"
+        value: "all"
       - key: SDV_VISION
         value: "off"
