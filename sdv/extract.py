@@ -12,18 +12,18 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
+from .columns import next_line_value, value_from_tail
 from .labels import asciify, looks_like_label, match_label
 from .models import FIELDS, DocRecord, ExtractedField
 from .normalize import is_blank, normalize
 import re
 
 _CONTAINER_ID = re.compile(r"\b[A-Z]{4}\d{6,7}\b")
-_LEAD = re.compile(r"^[\s:\-\u2013\u2014]+")
 _UNKNOWN_LABEL = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 /().,'\-]{2,60}?)\s*:\s*(\S.*)$")
 
 
 def _value_after(line: str, end: int) -> str:
-    return _LEAD.sub("", line[end:]).strip()
+    return value_from_tail(line[end:])
 
 
 def extract_fields(
@@ -51,12 +51,10 @@ def extract_fields(
         if f == "container_count" and _CONTAINER_ID.search(raw):
             continue  # a row of the container table ("Container 1  GLBV3136500 40'HC ..."), not the count
         if not raw:
-            # Value may sit on the next line when the label line ends with only a colon/spacing.
-            j = i + 1
-            while j < len(lines) and not lines[j].strip():
-                j += 1
-            if j < len(lines) and lines[j][:1].isspace() and not looks_like_label(lines[j]) and lines[j].strip():
-                raw = lines[j].strip()
+            # Value may sit on the next line when the label line is empty; only if that line is plausibly a value.
+            raw = next_line_value(lines, i, f)
+        if raw and f in ("container_count", "gross_weight_kg") and not is_blank(raw) and normalize(f, raw) is None:
+            continue  # text where a number belongs (a table header such as "CONTAINER NUMBERS"): not this field's value
         _fill(out[f], f, raw, label, name, i, provenance)
 
     # AI-assisted step: unseen labels for fields still not found.

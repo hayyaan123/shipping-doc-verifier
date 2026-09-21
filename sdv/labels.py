@@ -35,7 +35,7 @@ _COMPILED = {f: re.compile(r"^\s*(?:" + p + r")(?=$|[\s:\-\.])", re.I) for f, p 
 _MATCH_ORDER = ["notify_party", "consignee", "shipper", "port_of_loading", "port_of_discharge", "container_count", "gross_weight_kg"]
 
 # Guard: the container TABLE header ("CONTAINER NO.  DESCRIPTION ...") must never read as a container count.
-_TABLE_HEADER = re.compile(r"^\s*container\s+no\b", re.I)
+_TABLE_HEADER = re.compile(r"^\s*container\s*(?:(?:no|nos|num|number|numbers|id|ids|seal|size|type)\b|#)", re.I)
 _NON_ASCII = re.compile(r"[^\x00-\x7f]")
 # A gloss is a parenthetical with non-ASCII text, or an EMPTY one left behind when a scan/PDF font drops the glyphs.
 _GLOSS = re.compile(r"\s*\((?:\s*|[^)]*[^\x00-\x7f][^)]*)\)")
@@ -64,6 +64,35 @@ def match_label(line: str):
                 end = g.end()
             return f, end, line[: m.end()].strip()
     return None
+
+
+# Label occurrences ANYWHERE in a line (the second extraction path scans for these). Where two labels overlap
+# ("Notify Party/Intermediate Consignee" contains "Consignee") the one earlier in _MATCH_ORDER wins.
+_ANYWHERE = {f: re.compile(r"(?<![^\s(])(?:" + p + r")(?=$|[\s:\-.(])", re.I) for f, p in LABEL_PATTERNS.items()}
+
+
+def find_labels(line: str) -> list:
+    """-> [(field, start, end)] for every label occurrence in the line, in text order."""
+    a = asciify(line)
+    if _TABLE_HEADER.match(a):
+        return []
+    taken, out = [], []
+    for f in _MATCH_ORDER:
+        for m in _ANYWHERE[f].finditer(a):
+            if any(m.start() < e and s < m.end() for s, e in taken):
+                continue
+            taken.append((m.start(), m.end()))
+            out.append((f, m.start(), m.end()))
+    return sorted(out, key=lambda t: t[1])
+
+
+def label_end(line: str, end: int) -> int:
+    """Skip bilingual glosses / empty parentheses that follow a label ending at `end`."""
+    while True:
+        g = _GLOSS.match(line, end)
+        if not g:
+            return end
+        end = g.end()
 
 
 def looks_like_label(line: str) -> bool:

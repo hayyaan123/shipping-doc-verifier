@@ -33,11 +33,14 @@ class Triage:
 
 _AUTOMATED = re.compile(r"automated notification|rpa bot|no action required", re.I)
 _SPAM = re.compile(
-    r"bit\.ly|https?://|gift card|you have won|bank officer|bank details|business proposal|mailbox has exceeded|"
+    r"bit\.ly|gift card|you have won|bank officer|bank details|business proposal|mailbox has exceeded|"
     r"verify your account|unpaid customs|\d+% off|buy now|claim your|winner|urgent transfer|prize",
     re.I,
 )
-_SEND_DRAFT = re.compile(r"(?:send|forward|provide|share)\b[^.\n]{0,25}\bdraft\s+(?:bl|bill of lading)", re.I)
+# Links are a WEAK spam marker (real signatures and tracking pages carry URLs); they are only tested after the
+# business rules below have had their say.
+_LINK = re.compile(r"https?://", re.I)
+_SEND_DRAFT = re.compile(r"(?:send|forward|provide|share)\b[^.\n]{0,25}\bdraft\s+(?:bl|b/l|bill of lading)", re.I)
 _DRAFT_BL = re.compile(r"draft\s+(?:bl|b/l|bill of lading)", re.I)
 _CHECK_WORDS = re.compile(r"check|compare|confirm|verify|discrepanc|revert|in order|for checking|advise", re.I)
 _WRONG_DOC_COMPARE = re.compile(r"\bSI\b.{0,40}(?:commercial invoice|packing list|certificate of origin).{0,80}\bBL\b", re.I | re.S)
@@ -74,8 +77,11 @@ def rule_triage(email: dict) -> Triage:
     if _DRAFT_BL.search(body) and _CHECK_WORDS.search(body):
         send = bool(_SEND_DRAFT.search(body)) and not has_pair_names
         return Triage("BL_COMPARISON", 0.95, send_draft=send, notes=["send-draft request" if send else "check/compare request"])
-    if has_pair_names and _SI_WORDS.search(text + " si "):
-        return Triage("BL_COMPARISON", 0.8, notes=["SI and BL attached"])
+    if has_pair_names:
+        # Two attachments named as an SI and a BL. The wording of the email is corroboration, not a precondition.
+        if _SI_WORDS.search(text) or (re.search(r"\bSI\b", text) and re.search(r"\bB/?L\b", text)):
+            return Triage("BL_COMPARISON", 0.8, notes=["SI and BL attached"])
+        return Triage("BL_COMPARISON", 0.7, notes=["SI and BL attached (email wording unhelpful)"])
 
     if _SI_REQUEST.search(body):
         return Triage("SI_REQUEST", 0.95, notes=["shipping instruction supplied"])
@@ -87,6 +93,8 @@ def rule_triage(email: dict) -> Triage:
         return Triage("INVOICE_QUERY", 0.9, notes=["invoice/charges wording in the body"])
     if _GENERAL_KNOWN.search(text):
         return Triage("GENERAL", 0.9, notes=["routine operational message"])
+    if _LINK.search(text):
+        return Triage("SPAM", 0.6, notes=["contains a link and matched no business rule"])
     return Triage("GENERAL", 0.5, notes=["no rule matched"])
 
 

@@ -28,7 +28,13 @@ class Inbox:
             raise FileNotFoundError(
                 f"No emails found: expected {d} to contain email_*.json files. "
                 f"--data must be the bundle folder that holds inbox/ and attachments/.{hint}")
-        return [json.loads(p.read_text(encoding="utf-8")) for p in found]
+        out = []
+        for p in found:
+            try:
+                out.append(json.loads(p.read_text(encoding="utf-8")))
+            except (ValueError, OSError) as e:  # one bad file is one failed case, not a dead run
+                out.append({"email_id": p.stem, "subject": "", "attachments": [], "_load_error": f"{type(e).__name__}: {e}"})
+        return out
 
     def __iter__(self):
         return iter(self.emails())

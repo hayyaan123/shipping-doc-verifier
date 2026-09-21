@@ -75,6 +75,8 @@ class FieldComparison:
     reason: str = ""  # why uncertain / what differed
     si_source: str = ""
     bl_source: str = ""
+    # For an uncertain field: which of the four escalation reasons it maps to (compare.py / pipeline.py decide).
+    review_reason: Optional[str] = None
 
 
 @dataclass

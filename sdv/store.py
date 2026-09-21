@@ -7,6 +7,7 @@ different from a NEEDS_REVIEW verdict (that one is a deliberate hand-off to a pe
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -30,6 +31,8 @@ class CaseStore:
     def __init__(self, path: str = "out/cases.db"):
         self.path = path
         self._lock = threading.Lock()
+        if path != ":memory:":
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(_SCHEMA)

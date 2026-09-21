@@ -39,14 +39,10 @@ def _load_docs(email: dict, inbox, resolver):
     records, texts = [], []
     for path in email.get("attachments", []):
         name = path.split("/")[-1]
-        try:
-            data = inbox.read_bytes(path)
-        except Exception as e:  # retrievable failure, surfaced rather than swallowed
-            from .readers import DocText
-
-            t = DocText("txt", readable=False, error=f"could not fetch attachment ({type(e).__name__})", text_layer=False)
-        else:
-            t = read_document(name, data)
+        # A failed fetch (network reset, timeout, 5xx) says nothing about the DOCUMENT. It propagates, and
+        # _safe_process records it as a retryable failure (result.error), never as a verdict.
+        data = inbox.read_bytes(path)
+        t = read_document(name, data)
         dtype = detect_doc_type(t.lines) if t.readable else DOC_UNKNOWN
         rec = build_record(name, t, dtype, resolver)
         records.append(rec)
@@ -55,6 +51,8 @@ def _load_docs(email: dict, inbox, resolver):
 
 
 def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=None, skip_triage: bool = False) -> EmailResult:
+    if email.get("_load_error"):
+        raise ValueError(f"email file could not be read: {email['_load_error']}")
     eid = email["email_id"]
     res = EmailResult(email_id=eid, subject=email.get("subject", ""))
     if skip_triage:  # a person uploaded the two documents to be compared: no need to guess what the email is
@@ -123,16 +121,18 @@ def process_email(email: dict, inbox, jev=None, jev_mode: str = "auto", vision=N
         if c.verdict == MISMATCH:
             ok, detail = verify.confirm(lines_si, lines_bl, c.field, si_rec.fields[c.field].value, bl_rec.fields[c.field].value)
             if not ok:
-                c.verdict, c.reason = UNCERTAIN, f"mismatch not confirmed: {detail}"
+                # The value was found but not reproducibly: a reading problem, so "unreadable" (never an accusation).
+                c.verdict, c.reason, c.review_reason = UNCERTAIN, f"mismatch not confirmed: {detail}", UNREADABLE
     res.comparisons = comps
 
     uncertain = [c for c in comps if c.verdict == UNCERTAIN]
     mism = [c for c in comps if c.verdict == MISMATCH]
     if uncertain:
-        blank = [c for c in uncertain if "blank" in c.reason or "not found" in c.reason]
-        reason = MISSING_VALUE if blank else UNREADABLE
+        # Each uncertain field carries one of the four allowed reasons; the spec's priority order picks one.
+        reason = next(r for r in REVIEW_PRIORITY if any((c.review_reason or UNREADABLE) == r for c in uncertain))
         detail = "; ".join(f"{label_for(c.field)}: {c.reason}" for c in uncertain)
-        return _review(res, reason, detail, keep_comparisons=True)
+        # A mismatch that survived verification is a fact about the documents, whatever else needs a person.
+        return _review(res, reason, detail, keep_comparisons=True, defect_fields=[c.field for c in mism])
 
     if mism:
         res.status = "MISMATCH"
@@ -183,11 +183,11 @@ def _scan_hint(res: EmailResult, email: dict, inbox, records: list, texts: list,
     res.evidence["scan_reading"] = hint
 
 
-def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool = False) -> EmailResult:
+def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool = False, defect_fields=None) -> EmailResult:
     res.status = NEEDS_REVIEW
     res.review_reason = reason
-    res.has_defect = False
-    res.defect_fields = []
+    res.defect_fields = list(defect_fields or [])  # confirmed defects survive an escalation for another field
+    res.has_defect = bool(res.defect_fields)
     res.summary = f"Needs review ({reason}): {detail}"
     res.evidence["review_reason"] = reason
     res.evidence["review_detail"] = detail
@@ -196,13 +196,21 @@ def _review(res: EmailResult, reason: str, detail: str, keep_comparisons: bool =
     return res
 
 
-def _safe_process(email, inbox, jev, jev_mode, vision) -> EmailResult:
+def _safe_id(email, fallback: str) -> str:
+    try:
+        return str(email["email_id"])
+    except Exception:
+        return fallback  # a malformed record must not take the run down
+
+
+def _safe_process(email, inbox, jev, jev_mode, vision, fallback_id: str = "malformed") -> EmailResult:
     try:
         return process_email(email, inbox, jev, jev_mode, vision)
     except MissingDependency:
         raise  # environment problem: stop loudly instead of producing wrong verdicts
     except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
-        r = EmailResult(email_id=email["email_id"], subject=email.get("subject", ""))
+        subject = email.get("subject", "") if isinstance(email, dict) else ""
+        r = EmailResult(email_id=_safe_id(email, fallback_id), subject=subject if isinstance(subject, str) else "")
         r.category = "GENERAL"
         r.error = f"{type(e).__name__}: {e}"
         r.summary = f"Processing failed (retryable): {r.error}"
@@ -222,12 +230,13 @@ def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = 
     results = []
     if workers <= 1:
         for n, email in enumerate(emails):
-            results.append(_safe_process(email, inbox, jev, jev_mode, vision))
+            results.append(_safe_process(email, inbox, jev, jev_mode, vision, f"malformed_{n + 1:04d}"))
             if progress:
                 progress(n + 1)
         return results
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for n, r in enumerate(pool.map(lambda e: _safe_process(e, inbox, jev, jev_mode, vision), emails)):
+        jobs = [(e, f"malformed_{k + 1:04d}") for k, e in enumerate(emails)]
+        for n, r in enumerate(pool.map(lambda j: _safe_process(j[0], inbox, jev, jev_mode, vision, j[1]), jobs)):
             results.append(r)
             if progress:
                 progress(n + 1)

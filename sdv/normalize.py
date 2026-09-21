@@ -41,8 +41,15 @@ def normalize_party(raw: str) -> str:
     s = _fold(raw).replace("&", " AND ")
     s = re.sub(r"[^A-Z0-9()]+", " ", s)  # punctuation -> space (parentheses kept: "(M)" is meaningful)
     tokens = [t for t in s.split() if t]
-    core = [t for t in tokens if t.lower() not in _LEGAL]
-    return " ".join(core) if core else " ".join(tokens)
+    # Legal-form words are dropped only where they ARE a legal suffix: at the end (a trailing "(M)"-style tag is
+    # kept apart). "AS ONE TRADING" and "ONE TRADING" are different companies; "ACME CO LTD" and "ACME" are not.
+    tail = []
+    while tokens and tokens[-1].startswith("("):
+        tail.insert(0, tokens.pop())
+    body = list(tokens)
+    while len(body) > 1 and body[-1].lower() in _LEGAL:
+        body.pop()
+    return " ".join(body + tail)
 
 
 def party_name_only(lines_first: str) -> str:
@@ -129,7 +136,7 @@ def normalize_weight_kg(raw: str) -> Optional[float]:
     m = _GROUPED.search(raw) or _PLAIN.search(raw)
     if not m:
         return None
-    tonnes = bool(_TONNE.search(raw[m.end():]))
+    tonnes = bool(_TONNE.search(raw[m.end():])) or bool(re.search(r"\b(?:mts?|tonnes?|tons?)\s*[:.=]?\s*$", raw[: m.start()], re.I))
     try:
         v = _to_number(m.group(0), tonnes)
     except ValueError:

@@ -11,7 +11,7 @@ and never accused.
 """
 from __future__ import annotations
 
-from .models import FIELDS, MATCH, MISMATCH, UNCERTAIN, DocRecord, FieldComparison
+from .models import FIELDS, MATCH, MISMATCH, MISSING_VALUE, UNCERTAIN, UNREADABLE, DocRecord, FieldComparison
 
 _STRING_FIELDS = {"shipper", "consignee", "notify_party", "port_of_loading", "port_of_discharge"}
 _LABELS = {
@@ -29,10 +29,11 @@ def label_for(field: str) -> str:
     return _LABELS.get(field, field)
 
 
-def edit_distance(a: str, b: str, cap: int = 3) -> int:
+def edit_distance(a: str, b: str, cap: int = None) -> int:
+    """Levenshtein distance. With `cap`, any distance above it is reported as cap + 1 (early exit); without, exact."""
     if a == b:
         return 0
-    if abs(len(a) - len(b)) > cap:
+    if cap is not None and abs(len(a) - len(b)) > cap:
         return cap + 1
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
@@ -72,6 +73,7 @@ def compare_field(field: str, si, bl) -> FieldComparison:
             problems.append(f"{tag}: blank or placeholder ({f.raw!r})" if f.raw else f"{tag}: blank")
     if problems:
         c.reason = "; ".join(problems)
+        c.review_reason = MISSING_VALUE  # the document has no usable value for this field
         return c
 
     if _equal(field, fs.value, fb.value):
@@ -85,19 +87,22 @@ def compare_field(field: str, si, bl) -> FieldComparison:
         # Scan reading drops/adds spaces and swaps look-alike characters; tolerate a fifth of the text (min 2 edits).
         # This only ever applies to values read from scans, which are never used for a verdict.
         limit = max(2, max(len(a), len(b)) // 5)
-        if min(edit_distance(a, b), edit_distance(a.replace(" ", ""), b.replace(" ", ""))) <= limit:
+        if min(edit_distance(a, b, limit), edit_distance(a.replace(" ", ""), b.replace(" ", ""), limit)) <= limit:
             c.reason = "differs slightly and at least one value came from OCR/vision; may be a reading error"
+            c.review_reason = UNREADABLE
             return c
     if shaky and field == "gross_weight_kg":
         try:
             x, y = float(fs.value), float(fb.value)
             if x and y and (abs(x * 1000 - y) < 1 or abs(y * 1000 - x) < 1):
                 c.reason = "weights differ only by a thousands/decimal separator; likely a scan misread"
+                c.review_reason = UNREADABLE
                 return c
         except (TypeError, ValueError):
             pass
     if shaky and field not in _STRING_FIELDS and (fs.confidence < 0.9 or fb.confidence < 0.9):
         c.reason = "numeric values differ but one read is low confidence; not tolerated, sent to review"
+        c.review_reason = UNREADABLE
         return c
 
     c.verdict = MISMATCH

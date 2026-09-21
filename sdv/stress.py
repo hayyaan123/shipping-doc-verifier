@@ -101,7 +101,66 @@ def _perturbations():
         P.append(("missing", f"{f} left as 'N/A'", None, lambda t, f=f: _edit(t, f, lambda v: "N/A")))
         P.append(("missing", f"{f} line removed", None, lambda t, f=f: _edit(t, f, lambda v: None)))
     P.append(("missing", "weight left as '____ MT'", None, lambda t: _edit(t, "gross_weight_kg", lambda v: "____ MT")))
+    # --- combined: ONE defect (or blank) AND one layout condition at the same time. Single perturbations pass while
+    # the two together can fail (a value cut short by a wide gap turns a real defect into "unconfirmed"). ---------------
+    for style in _STYLES:
+        P.append(("layout", f"clean documents, {style}", None, lambda t, s=style: _restyle(t, s)))
+        for f, val in [("shipper", "ZEBRA LOGISTICS PTE LTD"), ("consignee", "NORTHWIND B/L TRADING GMBH"),
+                       ("notify_party", "HARBOUR BOOKING AGENCY SDN BHD"), ("port_of_loading", "ROTTERDAM, NETHERLANDS"),
+                       ("port_of_discharge", "HAMBURG, GERMANY")]:
+            P.append(("combined", f"{f} replaced + {style}", f,
+                      lambda t, f=f, val=val, s=style: _restyle(_edit(t, f, lambda v: val), s) if _edit(t, f, lambda v: val) else None))
+        P.append(("combined", f"weight +1 kg + {style}", "gross_weight_kg",
+                  lambda t, s=style: _restyle(_edit(t, "gross_weight_kg", lambda v: f"{_num(v) + 1:,.0f} KG"), s) if _edit(t, "gross_weight_kg", lambda v: f"{_num(v) + 1:,.0f} KG") else None))
+    P.append(("blank_next", "weight label empty, next line is 'MEASUREMENT: 45.5 CBM'", None, _blank_weight_then_measurement))
+    P.append(("blank_next", "container label empty, next line is 'PACKAGES: 12 PKGS'", None, _blank_containers_then_packages))
     return P
+
+
+_STYLES = ["value 8 spaces after the label", "no space after the colon", "B/L number in a right-hand column", "long gap before a right-hand booking column"]
+
+
+def _restyle(text, style):
+    """Re-lay-out every labelled line without changing any value."""
+    if text is None:
+        return None
+    out = []
+    for line in text.split("\n"):
+        m = match_label(line)
+        if not m:
+            out.append(line)
+            continue
+        prefix, val = line[: m[1]].rstrip().rstrip(":"), line[m[1]:].lstrip(" :").strip()
+        if not val:
+            out.append(line)
+        elif style.startswith("value 8"):
+            out.append(f"{prefix}:        {val}")
+        elif style.startswith("no space"):
+            out.append(f"{prefix}:{val}")
+        elif style.startswith("B/L number"):
+            out.append(f"{prefix}: {val}  B/L No: ABCD1234567")
+        else:
+            out.append(f"{prefix}: {val}          Booking No: 998877")
+    return "\n".join(out)
+
+
+def _blank_then(text, field, following):
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        m = match_label(line)
+        if m and m[0] == field:
+            lines[i] = line[: m[1]].rstrip().rstrip(":") + ":"
+            lines.insert(i + 1, following)
+            return "\n".join(lines)
+    return None
+
+
+def _blank_weight_then_measurement(text):
+    return _blank_then(text, "gross_weight_kg", "MEASUREMENT: 45.5 CBM")
+
+
+def _blank_containers_then_packages(text):
+    return _blank_then(text, "container_count", "PACKAGES: 12 PKGS")
 
 
 def _relabel(text: str, field: str, new_label: str):
@@ -166,8 +225,10 @@ def run_stress(inbox: Inbox, out_dir: str = "out", limit=None, jev=None, jev_mod
                 ok = res.status == "OK"
             elif cls == "drift":
                 ok = res.status != "MISMATCH"
-            elif cls == "defect":
+            elif cls in ("defect", "combined"):
                 ok = res.status == "MISMATCH" and res.defect_fields == [fld]
+            elif cls == "layout":
+                ok = res.status == "OK"
             else:
                 ok = res.status == "NEEDS_REVIEW" and res.review_reason == "missing_value"
             record(cls, name, e, res, ok)

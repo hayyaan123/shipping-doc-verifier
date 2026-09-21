@@ -15,7 +15,11 @@ escalated to a human instead of guessed.
   re-read by a second, independent extraction path (`sdv/verify.py`). If the two reads
   disagree, the case goes to review.
 - **Escalate, don't guess.** `NEEDS_REVIEW` carries a reason, in priority order:
-  `unreadable` > `wrong_doc_type` > `missing_attachment` > `missing_value`.
+  `unreadable` > `wrong_doc_type` > `missing_attachment` > `missing_value`. Each uncertain field carries one of
+  the four: a blank, placeholder or missing value is `missing_value`; a value that is present but could not be read
+  reproducibly (the second extraction path disagreed, or a scan reading is shaky) is `unreadable`. If some other field
+  holds a mismatch that DID survive verification, that defect is kept (`has_defect` / `defect_fields`) on the
+  `NEEDS_REVIEW` row rather than erased. A network or fetch failure is never a verdict: it is a retryable failure.
 - **Fails safe.** No Jev key, no network, or a Jev error: rules-only mode still runs.
 
 ## Layout
@@ -36,7 +40,8 @@ escalated to a human instead of guessed.
 | `sdv/store.py` | SQLite case store; reviewer decisions; failed cases are retryable and distinct from verdicts |
 | `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
 | `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
-| `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift) |
+| `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift, plus layout / combined: a defect AND a layout quirk at once) |
+| `sdv/columns.py` | The one rule, shared by both extraction paths, for where a value ends and for a value on the line below |
 | `sdv/oddpdf.py` | Re-renders documents as 16 unusual PDF layouts and checks the verdicts |
 | `sdv/vision.py` | Open-weights vision model / Tesseract that reads scanned PDFs as an unverified reviewer hint |
 | `sdv/cloud.py` | Mirror cases and decisions to Cloud Firestore |
@@ -150,7 +155,7 @@ SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data te
 | --- | --- | --- |
 | Rules-only pipeline vs the organizers' reference labels, 520 emails | `run --jev off` + `scripts/eval_local.py` | 0 disagreements |
 | Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
-| Stress test: 51 verified-clean emails, 1,530 controlled edits | `stress` | benign 306/306 stay OK; defects 459/459 caught on exactly the edited field; blanks and removals 357/357 escalated; missing attachment, wrong document, corrupt PDF 153/153 escalated; unfamiliar labels 255/255 never a false mismatch (rules-only: all escalated to a person) |
+| Stress test: 51 verified-clean emails, 3,000+ controlled edits incl. 1,224 defect-plus-layout combinations | `stress` | benign 306/306 stay OK; defects 459/459 caught on exactly the edited field; blanks and removals 357/357 escalated; missing attachment, wrong document, corrupt PDF 153/153 escalated; unfamiliar labels 255/255 never a false mismatch (rules-only: all escalated to a person) |
 
 | Odd-PDF test: one document re-rendered as an unusual PDF (tables, value below label, rotated, watermark, multi-page, Chinese glosses, encrypted, abbreviated / renamed labels, 5 number formats) | `oddpdf` | see "Odd-PDF test" below |
 

@@ -126,13 +126,15 @@ def main(argv=None) -> int:
             print("[vision] no VISION_API_KEY and no tesseract found; scans stay unread", file=sys.stderr)
     results = process_all(inbox, jev, args.jev, args.limit, vision=vision)
     write_outputs(results, args.out)
+    write_submission(results, f"{args.out}/submission.json")  # the deliverable first: nothing below may lose it
     if args.db:
         from .store import CaseStore
 
-        store = CaseStore(args.db)
-        store.upsert_many([r.to_dict() for r in results])
-        print(f"[store] {len(results)} cases saved to {args.db}")
-    write_submission(results, f"{args.out}/submission.json")
+        try:
+            CaseStore(args.db).upsert_many([r.to_dict() for r in results])
+            print(f"[store] {len(results)} cases saved to {args.db}")
+        except Exception as e:
+            print(f"[store] could not save to {args.db}: {type(e).__name__}: {e} (submission.json was written)", file=sys.stderr)
     print(text_report(results).split("\n\n")[0])
     from .health import format_health, run_health, write_health
 
