@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_BASE_URL = "https://router.huggingface.co/v1"
-DEFAULT_MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"  # open weights; list what your account can use: scripts/check_vision.py --list
 PROMPT = ("Transcribe this scanned shipping document exactly as printed. Output one printed line per output line and keep "
           "each label together with its value on the same line, like 'Consignee: NAME'. Do not correct spelling, translate, "
           "summarise, explain or add anything. Plain text only.")
