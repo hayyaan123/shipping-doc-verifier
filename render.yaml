@@ -1,0 +1,13 @@
+# Render Blueprint: a free web service built from the Dockerfile.
+services:
+  - type: web
+    name: shipping-doc-verifier
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/stats
+    envVars:
+      - key: SDV_JEV
+        value: "off"
+      - key: SDV_VISION
+        value: "off"

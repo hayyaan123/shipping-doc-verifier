@@ -147,19 +147,21 @@ fixes: 2,520/2,520 on 30 emails. These layouts are ones we thought of, so they a
 
 ## Hosting the console publicly (free)
 
-The hackathon requires a public, working prototype. The repo ships a `Dockerfile` (and `docker-compose.yml`) that
-processes the bundled sample inbox (`demo/data`, synthetic) into a case database at build time and serves the console,
-including the two-document upload check. Jev and the vision model are OFF on a public copy (uploads use rules only),
-so nobody can spend your credits; set `SDV_JEV=auto` and a `TYPESAFE_API_KEY` secret to change that.
+The hackathon requires a public, working prototype. The repo ships a `Dockerfile`, `docker-compose.yml` and a
+`render.yaml` blueprint. The image processes the bundled sample inbox (`demo/data`, synthetic) into a case database at
+build time and serves the console, including the two-document upload check, on `$PORT`. Jev and the vision model are
+OFF on a public copy (uploads use rules only), so nobody can spend your credits; set `SDV_JEV=auto` and a
+`TYPESAFE_API_KEY` secret to change that.
 
 ```bash
-docker compose up --build            # http://localhost:7860
-python scripts/make_space.py space   # folder ready to push to a Hugging Face Space (Docker SDK)
+docker compose up --build     # http://localhost:7860
 ```
 
-If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before building, the hosted console shows the
-classifications made with Jev and still needs no key. A hosted copy keeps reviewer decisions only until the
-container restarts.
+Render (free web service, no card): New > Web Service > Public Git Repository > this repo > Runtime Docker > Free.
+A free service sleeps after 15 minutes without traffic (about a minute to wake); a free uptime pinger on
+`/api/stats` every 5 minutes keeps it awake. If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before
+building, the hosted console shows the classifications made with Jev and still needs no key. A hosted copy keeps
+reviewer decisions only until the container restarts.
 
 ## Tests
 
