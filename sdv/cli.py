@@ -51,6 +51,7 @@ def main(argv=None) -> int:
     srv = sub.add_parser("serve", help="run the review console over a case store")
     srv.add_argument("--db", default="out/cases.db")
     srv.add_argument("--port", type=int, default=8000)
+    srv.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept connections from other machines (containers, hosting)")
     srv.add_argument("--data", default=None, help="optional: enables the console's Retry-failed button")
     srv.add_argument("--jev", choices=["off", "auto", "all"], default="off")
     srv.add_argument("--vision", choices=["off", "auto", "vlm", "tesseract"], default="off",
@@ -193,7 +194,7 @@ def _serve(args) -> int:
         from .vision import VisionReader
 
         vision = VisionReader.from_env(args.env, args.vision)
-    serve(CaseStore(args.db), port=args.port, inbox=inbox, jev=jev, jev_mode=args.jev, vision=vision)
+    serve(CaseStore(args.db), host=args.host, port=args.port, inbox=inbox, jev=jev, jev_mode=args.jev, vision=vision)
     return 0
 
 

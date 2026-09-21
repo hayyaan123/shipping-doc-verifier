@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+out
+site
+.cache
+__pycache__
+*.pyc
+tests
+scripts

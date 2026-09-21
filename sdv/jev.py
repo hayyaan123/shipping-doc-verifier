@@ -50,10 +50,11 @@ def find_api_key(env_path: str = ".env") -> Optional[str]:
 
 
 class JevClient:
-    def __init__(self, api_key: Optional[str] = None, cache_dir: str = ".cache/jev", model: str = "jev-latest",
+    def __init__(self, api_key: Optional[str] = None, cache_dir: Optional[str] = None, model: str = "jev-latest",
                  timeout: float = 30.0, max_retries: int = 3):
         self.api_key = api_key if api_key is not None else find_api_key()
-        self.cache_dir = Path(cache_dir)
+        # SDV_JEV_CACHE lets a deployment ship pre-computed answers (no key needed to serve them).
+        self.cache_dir = Path(cache_dir or os.environ.get("SDV_JEV_CACHE") or ".cache/jev")
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries

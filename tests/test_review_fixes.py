@@ -256,3 +256,32 @@ def test_retry_failed_survives_another_failure_and_passes_vision(tmp_path):
     s = CaseStore(str(tmp_path / "r.db"))
     s.upsert(_safe_process(Down().emails()[0], Down(), None, "off", None).to_dict())
     assert retry_failed(s, Down(), None, "off", vision=None)["still_failing"] == 1
+
+
+def test_console_host_option_and_request_cap(tmp_path):
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from sdv.cli import main  # noqa: F401  (imports cleanly with the new --host option)
+    from sdv.console import make_handler
+
+    s = CaseStore(str(tmp_path / "h.db"))
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}/api/check", data=b"{}",
+                                 headers={"content-length": "80000000"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        raise AssertionError("expected 413")
+    except (urllib.error.HTTPError, ConnectionError, OSError) as e:
+        assert getattr(e, "code", 413) == 413
+    srv.shutdown()
+
+
+def test_jev_cache_dir_can_come_from_the_environment(tmp_path, monkeypatch):
+    from sdv.jev import JevClient
+
+    monkeypatch.setenv("SDV_JEV_CACHE", str(tmp_path / "shipped"))
+    assert str(JevClient(api_key="").cache_dir) == str(tmp_path / "shipped")

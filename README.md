@@ -145,6 +145,22 @@ read as the container count, empty parentheses left by a dropped CJK font breaki
 extraction path not following a value on the line below its label. All were fixed generally (not per file). After the
 fixes: 2,520/2,520 on 30 emails. These layouts are ones we thought of, so they are evidence of robustness, not proof.
 
+## Hosting the console publicly (free)
+
+The hackathon requires a public, working prototype. The repo ships a `Dockerfile` (and `docker-compose.yml`) that
+processes the bundled sample inbox (`demo/data`, synthetic) into a case database at build time and serves the console,
+including the two-document upload check. Jev and the vision model are OFF on a public copy (uploads use rules only),
+so nobody can spend your credits; set `SDV_JEV=auto` and a `TYPESAFE_API_KEY` secret to change that.
+
+```bash
+docker compose up --build            # http://localhost:7860
+python scripts/make_space.py space   # folder ready to push to a Hugging Face Space (Docker SDK)
+```
+
+If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before building, the hosted console shows the
+classifications made with Jev and still needs no key. A hosted copy keeps reviewer decisions only until the
+container restarts.
+
 ## Tests
 
 ```bash

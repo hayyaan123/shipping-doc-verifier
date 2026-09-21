@@ -86,6 +86,8 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto",
         def do_POST(self):
             u = urlparse(self.path)
             n = int(self.headers.get("content-length") or 0)
+            if n > 70_000_000:  # a public console must not read unbounded bodies (4 files x 15 MB, base64)
+                return self._send(413, json.dumps({"error": "request too large"}))
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
             except ValueError:
