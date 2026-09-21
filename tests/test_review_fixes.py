@@ -162,3 +162,97 @@ def test_db_in_a_new_folder_and_submission_written_first(tmp_path):
     out2 = tmp_path / "out2"
     main(["run", "--data", str(tmp_path / "data"), "--out", str(out2), "--jev", "off", "--vision", "off", "--db", str(blocker / "x.db")])
     assert (out2 / "submission.json").exists()
+
+
+HEADER = "SHIPPER / EXPORTER          CONSIGNEE               NOTIFY PARTY\n"
+
+
+def test_a_row_of_bare_labels_is_a_header_not_a_value():
+    bl = BL.replace("Shipper: APRIL", HEADER + "Shipper: APRIL", 1)
+    r = check(bl=bl)
+    assert r.status == "OK", (r.status, r.defect_fields)
+    r = check(bl=bl.replace("Consignee: MOORIM SP CO., LTD", "Consignee: NORTHWIND TRADING GMBH"))
+    assert r.status == "MISMATCH" and r.defect_fields == ["consignee"]
+    assert extract_fields(HEADER.split("\n"), "d")["shipper"].found is False
+
+
+def test_second_path_does_not_confirm_when_a_field_has_two_different_values():
+    from sdv.verify import confirm
+
+    lines_si = ["Shipper: ACME LTD"]
+    lines_bl = ["SHIPPER    CONSIGNEE   FOO", "Shipper: REAL SHIPPER LTD"]  # unknown third column: not a recognisable header
+    first = extract_fields(lines_bl, "d")["shipper"].value
+    assert first != normalize_party("REAL SHIPPER LTD")  # the first path took the header cell
+    ok, why = confirm(lines_si, lines_bl, "shipper", normalize_party("ACME LTD"), first)
+    assert not ok and "more than one value" in why
+    r = check(bl=BL.replace("Shipper: APRIL", "SHIPPER    CONSIGNEE   FOO\nShipper: APRIL", 1))
+    assert r.status != "MISMATCH" or "shipper" not in r.defect_fields  # a wrong-line read is never an accusation
+
+
+def test_failed_comparison_keeps_its_category_and_is_handed_to_a_person():
+    class Down:
+        def read_bytes(self, p):
+            raise ConnectionResetError("boom")
+
+    email = {"email_id": "e9", "subject": "Please check", "body": "Please check the draft BL against the SI", "attachments": ["a_SI.txt", "a_BL.txt"]}
+    r = _safe_process(email, Down(), None, "off", None)
+    assert r.error and r.category == "BL_COMPARISON" and r.status == "NEEDS_REVIEW" and r.review_reason == "unreadable"
+    sub = r.to_submission()
+    assert sub["category"] == "BL_COMPARISON" and sub["status"] == "NEEDS_REVIEW"
+    plain = _safe_process({"email_id": "e10", "subject": "hi", "body": "Happy new year", "attachments": []}, Down(), None, "off", None)
+    assert plain.category == "GENERAL" and plain.status == "OK" and not plain.error
+
+
+def test_reports_name_a_confirmed_defect_on_a_needs_review_row():
+    from sdv.report import html_report, text_report
+
+    r = check(bl=BL.replace("Consignee: MOORIM SP CO., LTD", "Consignee: NORTHWIND TRADING GMBH").replace("Gross Weight (KGS): 21,577 KGS", "Gross Weight (KGS): N/A"))
+    r.category = "BL_COMPARISON"
+    assert "CONFIRMED MISMATCH" in text_report([r]) and "Confirmed mismatch" in html_report([r])
+
+
+def test_upload_ids_are_unique_across_threads(tmp_path):
+    import threading
+
+    s = CaseStore(str(tmp_path / "u.db"))
+    got, lock = [], threading.Lock()
+
+    def take():
+        i = s.next_upload_id()
+        with lock:
+            got.append(i)
+
+    ts = [threading.Thread(target=take) for _ in range(16)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(set(got)) == 16
+
+
+def test_title_below_a_letterhead_and_invoice_no_field_in_a_bl():
+    from sdv.doctype import detect_doc_type
+
+    lines = ["REF X"] * 9 + ["BILL OF LADING (DRAFT)", "Invoice No. 55", "Shipper: A"]
+    assert detect_doc_type(lines) == "BL"
+    assert detect_doc_type(["Ref"] * 9 + ["THIS IS A COMMERCIAL INVOICE"]) == "COMMERCIAL_INVOICE"
+    assert detect_doc_type(["Ref"] * 3 + ["Invoice No: 5"]) == "COMMERCIAL_INVOICE"
+
+
+def test_placeholder_question_marks_only_when_nothing_else_is_there():
+    from sdv.normalize import is_blank
+
+    assert is_blank("???") and is_blank("? TBC") and not is_blank("??? LTD")
+
+
+def test_retry_failed_survives_another_failure_and_passes_vision(tmp_path):
+    from sdv.store import retry_failed
+
+    class Down:
+        def emails(self):
+            return [{"email_id": "e1", "subject": "s", "body": "Please check the draft BL against the SI", "attachments": ["a_SI.txt", "a_BL.txt"]}]
+
+        def read_bytes(self, p):
+            raise ConnectionResetError("still down")
+
+    s = CaseStore(str(tmp_path / "r.db"))
+    s.upsert(_safe_process(Down().emails()[0], Down(), None, "off", None).to_dict())
+    assert retry_failed(s, Down(), None, "off", vision=None)["still_failing"] == 1

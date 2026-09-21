@@ -88,7 +88,7 @@ class VisionReader:
             cached = self._cache_get(key)
             if cached is not None:
                 self.cache_hits += 1
-                self.last_engine = engine
+                self.last_engine = engine if engine != "vlm" else f"vlm:{self.model}"
                 return cached
             text = self._vlm(pages) if engine == "vlm" else self._tesseract(pages)
             lines = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
@@ -104,14 +104,17 @@ class VisionReader:
         for png in pages:
             parts.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}})
         body = json.dumps({"model": self.model, "messages": [{"role": "user", "content": parts}],
-                           "temperature": 0, "max_tokens": 1200}).encode()
+                           "temperature": 0, "max_tokens": 4096}).encode()
         req = urllib.request.Request(self.base_url + "/chat/completions", data=body, method="POST",
                                      headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
         self.calls += 1
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 data = json.loads(r.read())
-            return data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            if choice.get("finish_reason") == "length":  # a cut-off transcription may have lost lines: note it
+                self.last_error = "transcription truncated at max_tokens; later lines may be missing"
+            return choice["message"]["content"]
         except urllib.error.HTTPError as e:
             self.failures += 1
             try:

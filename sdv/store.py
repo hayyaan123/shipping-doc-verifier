@@ -31,6 +31,7 @@ class CaseStore:
     def __init__(self, path: str = "out/cases.db"):
         self.path = path
         self._lock = threading.Lock()
+        self._reserved: set = set()
         if path != ":memory:":
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self._db = sqlite3.connect(path, check_same_thread=False)
@@ -53,11 +54,15 @@ class CaseStore:
             )
 
     def next_upload_id(self) -> str:
-        row = self._db.execute("SELECT COUNT(*) FROM cases WHERE email_id LIKE 'upload_%'").fetchone()
-        n = row[0] + 1
-        while self.get(f"upload_{n:03d}") is not None:
-            n += 1
-        return f"upload_{n:03d}"
+        """Hand out an id no other caller has been given (two simultaneous uploads must not collide)."""
+        with self._lock:
+            row = self._db.execute("SELECT COUNT(*) FROM cases WHERE email_id LIKE 'upload_%'").fetchone()
+            n = row[0] + 1
+            while (self._db.execute("SELECT 1 FROM cases WHERE email_id=?", (f"upload_{n:03d}",)).fetchone()
+                   or f"upload_{n:03d}" in self._reserved):
+                n += 1
+            self._reserved.add(f"upload_{n:03d}")
+            return f"upload_{n:03d}"
 
     def upsert_many(self, rows: list) -> None:
         for r in rows:
@@ -134,15 +139,15 @@ def _count(it) -> dict:
     return out
 
 
-def retry_failed(store: CaseStore, inbox, jev=None, jev_mode: str = "auto") -> dict:
+def retry_failed(store: CaseStore, inbox, jev=None, jev_mode: str = "auto", vision=None) -> dict:
     """Re-run only the cases that failed processing. Verdict-level hand-offs are never retried."""
-    from .pipeline import process_email
+    from .pipeline import _safe_process
 
     wanted = {r["email_id"] for r in store.failed()}
     fixed = still = 0
     for email in inbox.emails():
         if email["email_id"] in wanted:
-            res = process_email(email, inbox, jev, jev_mode)
+            res = _safe_process(email, inbox, jev, jev_mode, vision)
             store.upsert(res.to_dict())
             fixed, still = (fixed + 1, still) if not res.error else (fixed, still + 1)
     return {"retried": fixed + still, "recovered": fixed, "still_failing": still}

@@ -77,8 +77,9 @@ class JevClient:
         cp = self._cache_path(payload)
         if cp.exists():
             try:
+                answers = json.loads(cp.read_text(encoding="utf-8"))["answers"]
                 self.cache_hits += 1
-                return json.loads(cp.read_text(encoding="utf-8"))["answers"]
+                return answers
             except Exception:
                 pass
         if not self.available:

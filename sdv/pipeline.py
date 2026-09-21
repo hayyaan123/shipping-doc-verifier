@@ -15,7 +15,7 @@ from .models import (DOC_BL, DOC_SI, DOC_UNKNOWN, FIELDS, MATCH, MISMATCH, MISSI
                      OK, REVIEW_PRIORITY, UNCERTAIN, UNREADABLE, WRONG_DOC_TYPE, WRONG_DOC_TYPES, EmailResult)
 from .deps import MissingDependency
 from .readers import read_document
-from .triage import triage
+from .triage import rule_triage, triage
 
 
 def _make_label_resolver(jev, log: Optional[list] = None) -> Optional[Callable]:
@@ -203,18 +203,33 @@ def _safe_id(email, fallback: str) -> str:
         return fallback  # a malformed record must not take the run down
 
 
+def _failed_result(email, exc: Exception, fallback_id: str = "malformed", category: Optional[str] = None) -> EmailResult:
+    """A processing FAILURE (not a verdict). The row keeps the category the cheap rules give it and, for a
+    comparison request, is handed to a person rather than submitted as a clean "OK": the email was never checked.
+    `error` stays set, so the store lists it as failed and retry re-runs it."""
+    subject = email.get("subject", "") if isinstance(email, dict) else ""
+    r = EmailResult(email_id=_safe_id(email, fallback_id), subject=subject if isinstance(subject, str) else "")
+    if category is None:
+        try:
+            category = rule_triage(email).category
+        except Exception:
+            category = "GENERAL"
+    r.category = category
+    r.category_method = "rules"
+    r.error = f"{type(exc).__name__}: {exc}"
+    r.summary = f"Processing failed (retryable): {r.error}"
+    if category == "BL_COMPARISON":
+        r.status, r.review_reason = NEEDS_REVIEW, UNREADABLE
+    return r
+
+
 def _safe_process(email, inbox, jev, jev_mode, vision, fallback_id: str = "malformed") -> EmailResult:
     try:
         return process_email(email, inbox, jev, jev_mode, vision)
     except MissingDependency:
         raise  # environment problem: stop loudly instead of producing wrong verdicts
     except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
-        subject = email.get("subject", "") if isinstance(email, dict) else ""
-        r = EmailResult(email_id=_safe_id(email, fallback_id), subject=subject if isinstance(subject, str) else "")
-        r.category = "GENERAL"
-        r.error = f"{type(e).__name__}: {e}"
-        r.summary = f"Processing failed (retryable): {r.error}"
-        return r
+        return _failed_result(email, e, fallback_id)
 
 
 def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = None, progress=None, vision=None,
@@ -263,7 +278,4 @@ def check_uploaded(files: list, email_id: str = "upload", jev=None, jev_mode: st
     except MissingDependency:
         raise
     except Exception as e:
-        r = EmailResult(email_id=email_id, subject=email["subject"], category="BL_COMPARISON")
-        r.error = f"{type(e).__name__}: {e}"
-        r.summary = f"Processing failed (retryable): {r.error}"
-        return r
+        return _failed_result(email, e, email_id, category="BL_COMPARISON")

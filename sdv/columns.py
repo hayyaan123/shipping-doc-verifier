@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from .labels import asciify, looks_like_label
+from .labels import _bare_label, asciify, looks_like_label
 
 _LEAD = re.compile(r"^[\s:\-\u2013\u2014]+")
 _GAP = re.compile(r"\t|\s{2,}")
@@ -42,6 +42,8 @@ def value_from_tail(tail: str) -> str:
     for i, p in enumerate(parts):
         if i > 0 and _is_column_label(p):
             break
+        if i == 0 and gap_first and _bare_label(p):
+            break  # "Shipper:      CONSIGNEE": a header cell, not the value
         if i == 0 and (looks_like_label(p) or _UNKNOWN_COL.match(asciify(p).strip())) and ":" in p[:40] and gap_first:
             break  # the value is empty and the next column has already begun
         keep.append(p.strip())

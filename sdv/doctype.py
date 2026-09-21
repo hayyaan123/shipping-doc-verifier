@@ -22,17 +22,35 @@ _RULES = [
 ]
 
 
+# A wrong-document marker in the BODY must be strong: a real BL mentions "Invoice No." as an ordinary field.
+_BODY_MARKERS = [
+    (DOC_INVOICE, re.compile(r"commercial\s+invoice", re.I)),
+    (DOC_PACKING, re.compile(r"packing\s+list", re.I)),
+    (DOC_COO, re.compile(r"certificate\s+of\s+origin", re.I)),
+]
+_TITLE_MAX_CHARS = 60
+
+
+def _looks_like_title(line: str) -> bool:
+    return len(line) <= _TITLE_MAX_CHARS and ":" not in line
+
+
 def detect_doc_type(lines: list) -> str:
-    """Look at the title area of the document (first non-empty lines)."""
-    head = [l.strip() for l in lines if l.strip()][:_HEAD_LINES]
-    for line in head:
+    """Decide the type from the title area, then from any title-like line further down, then from strong body markers."""
+    nonempty = [l.strip() for l in lines if l.strip()]
+    for line in nonempty[:_HEAD_LINES]:
         for dtype, rx in _RULES:
             if rx.search(line):
                 return dtype
-    # Fall back to the whole text for wrong-document markers (footers such as "THIS IS A COMMERCIAL INVOICE").
+    # The title may sit below a letterhead / reference block: a SHORT line without a colon is a title, not a field.
+    for line in nonempty[_HEAD_LINES:]:
+        if _looks_like_title(line):
+            for dtype, rx in _RULES[3:] + _RULES[:3]:
+                if rx.search(line):
+                    return dtype
+    # Wrong-document footers ("THIS IS A COMMERCIAL INVOICE") anywhere in the text, but only strong markers.
     body = "\n".join(lines)
-    for dtype in (DOC_INVOICE, DOC_PACKING, DOC_COO):
-        rx = dict(_RULES)[dtype]
+    for dtype, rx in _BODY_MARKERS:
         if rx.search(body):
             return dtype
     return DOC_UNKNOWN

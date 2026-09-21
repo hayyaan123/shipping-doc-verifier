@@ -12,7 +12,6 @@ from .models import MISMATCH, NEEDS_REVIEW
 
 def text_report(results: list) -> str:
     lines = []
-    c = Counter((r.category, r.status) for r in results)
     lines.append(f"Emails processed: {len(results)}")
     lines.append("By category: " + ", ".join(f"{k}={v}" for k, v in sorted(Counter(r.category for r in results).items())))
     cmp_ = [r for r in results if r.category == "BL_COMPARISON"]
@@ -29,6 +28,11 @@ def text_report(results: list) -> str:
                     lines.append(f"    {label_for(cmp.field):20} SI: {cmp.si_value}   |   BL: {cmp.bl_value}")
         elif r.status == NEEDS_REVIEW:
             lines.append(f"    review reason: {r.review_reason} - {r.evidence.get('review_detail', '')}")
+            for cmp in r.comparisons:  # a mismatch confirmed by both extraction paths is still a finding
+                if cmp.verdict == "mismatch":
+                    lines.append(f"    CONFIRMED MISMATCH  {label_for(cmp.field):20} SI: {cmp.si_value}   |   BL: {cmp.bl_value}")
+            if r.error:
+                lines.append(f"    processing failure (retryable): {r.error}")
         else:
             lines.append(f"    {r.summary}")
     return "\n".join(lines) + "\n"
@@ -47,14 +51,19 @@ def html_report(results: list) -> str:
     for r in results:
         if r.category != "BL_COMPARISON":
             continue
-        cls = {"OK": "ok", "MISMATCH": "bad", "NEEDS_REVIEW": "rev"}[r.status]
+        cls = {"OK": "ok", "MISMATCH": "bad", "NEEDS_REVIEW": "rev"}.get(r.status, "rev")
         detail = ""
+        table = "<table class='d'><tr><th>Field</th><th>SI</th><th>BL</th></tr>" + "".join(
+            f"<tr><td>{html.escape(label_for(c.field))}</td><td>{html.escape(c.si_value or '')}</td><td>{html.escape(c.bl_value or '')}</td></tr>"
+            for c in r.comparisons if c.verdict == "mismatch") + "</table>"
         if r.status == MISMATCH:
-            detail = "<table class='d'><tr><th>Field</th><th>SI</th><th>BL</th></tr>" + "".join(
-                f"<tr><td>{html.escape(label_for(c.field))}</td><td>{html.escape(c.si_value or '')}</td><td>{html.escape(c.bl_value or '')}</td></tr>"
-                for c in r.comparisons if c.verdict == "mismatch") + "</table>"
+            detail = table
         elif r.status == NEEDS_REVIEW:
             detail = f"<b>{html.escape(r.review_reason or '')}</b>: {html.escape(r.evidence.get('review_detail', ''))}"
+            if any(c.verdict == "mismatch" for c in r.comparisons):
+                detail += "<br><b>Confirmed mismatch:</b>" + table
+            if r.error:
+                detail += "<br><i>Processing failure (retryable): " + html.escape(r.error) + "</i>"
         else:
             detail = html.escape(r.summary)
         rows.append(f"<tr class='{cls}'><td>{html.escape(r.email_id)}</td><td>{html.escape(r.subject[:80])}</td><td>{r.status}</td><td>{detail}</td></tr>")

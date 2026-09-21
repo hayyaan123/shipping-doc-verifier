@@ -112,9 +112,24 @@ def _perturbations():
                       lambda t, f=f, val=val, s=style: _restyle(_edit(t, f, lambda v: val), s) if _edit(t, f, lambda v: val) else None))
         P.append(("combined", f"weight +1 kg + {style}", "gross_weight_kg",
                   lambda t, s=style: _restyle(_edit(t, "gross_weight_kg", lambda v: f"{_num(v) + 1:,.0f} KG"), s) if _edit(t, "gross_weight_kg", lambda v: f"{_num(v) + 1:,.0f} KG") else None))
+    P.append(("layout", "bare-label header row above the fields", None, _add_header))
+    for f, val in [("shipper", "ZEBRA LOGISTICS PTE LTD"), ("consignee", "NORTHWIND TRADING GMBH")]:
+        P.append(("combined", f"{f} replaced + bare-label header row", f,
+                  lambda t, f=f, val=val: _add_header(_edit(t, f, lambda v: val)) if _edit(t, f, lambda v: val) else None))
     P.append(("blank_next", "weight label empty, next line is 'MEASUREMENT: 45.5 CBM'", None, _blank_weight_then_measurement))
     P.append(("blank_next", "container label empty, next line is 'PACKAGES: 12 PKGS'", None, _blank_containers_then_packages))
     return P
+
+
+def _add_header(text):
+    if text is None:
+        return None
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if match_label(line):
+            lines.insert(i, "SHIPPER / EXPORTER          CONSIGNEE               NOTIFY PARTY")
+            return "\n".join(lines)
+    return None
 
 
 _STYLES = ["value 8 spaces after the label", "no space after the colon", "B/L number in a right-hand column", "long gap before a right-hand booking column"]

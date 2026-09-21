@@ -12,7 +12,7 @@ from typing import Optional
 # Values that mean "nothing was filled in".
 PLACEHOLDER = re.compile(
     r"^\s*(?:n\s*/\s*a|n\.a\.?|na|tba|tbd|tbc|to\s+be\s+(?:advised|confirmed|determined|announced)|nil|none|unknown|"
-    r"pending|-+|_+\s*[a-z]*|\?+.*|x{2,}|\.+)\s*$",
+    r"pending|-+|_+\s*[a-z]*|\?+(?:\s*(?:tb[acd]|to\s+be\s+\w+|confirm\w*|pending))?|x{2,}|\.+)\s*$",
     re.I,
 )
 

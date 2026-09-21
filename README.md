@@ -19,7 +19,10 @@ escalated to a human instead of guessed.
   the four: a blank, placeholder or missing value is `missing_value`; a value that is present but could not be read
   reproducibly (the second extraction path disagreed, or a scan reading is shaky) is `unreadable`. If some other field
   holds a mismatch that DID survive verification, that defect is kept (`has_defect` / `defect_fields`) on the
-  `NEEDS_REVIEW` row rather than erased. A network or fetch failure is never a verdict: it is a retryable failure.
+  `NEEDS_REVIEW` row rather than erased. A network or fetch failure is never a verdict: it is a retryable failure, and
+  its submission row keeps the category the rules give it and (for a comparison request) is handed to a person as
+  `NEEDS_REVIEW`, never submitted as a clean `OK`. The second extraction path reads EVERY occurrence of a label; a
+  document that gives two different values for one field is not confirmed, so a wrong-line read is never an accusation.
 - **Fails safe.** No Jev key, no network, or a Jev error: rules-only mode still runs.
 
 ## Layout

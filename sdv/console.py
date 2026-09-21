@@ -104,7 +104,7 @@ def make_handler(store: CaseStore, inbox=None, jev=None, jev_mode: str = "auto",
             if u.path == "/api/retry":
                 if inbox is None:
                     return self._send(409, json.dumps({"error": "start the server with --data to enable retries"}))
-                return self._send(200, json.dumps(retry_failed(store, inbox, jev, jev_mode)))
+                return self._send(200, json.dumps(retry_failed(store, inbox, jev, jev_mode, vision)))
             self._send(404, json.dumps({"error": "not found"}))
 
     return H

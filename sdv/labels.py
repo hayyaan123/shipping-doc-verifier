@@ -49,7 +49,7 @@ def asciify(line: str) -> str:
 def match_label(line: str):
     """Return (field, end_index_of_label, label_text) if the line starts with a known label, else None."""
     a = asciify(line)
-    if _TABLE_HEADER.match(a):
+    if _TABLE_HEADER.match(a) or is_header_row(a):
         return None
     for f in _MATCH_ORDER:
         m = _COMPILED[f].match(a)
@@ -74,7 +74,7 @@ _ANYWHERE = {f: re.compile(r"(?<![^\s(])(?:" + p + r")(?=$|[\s:\-.(])", re.I) fo
 def find_labels(line: str) -> list:
     """-> [(field, start, end)] for every label occurrence in the line, in text order."""
     a = asciify(line)
-    if _TABLE_HEADER.match(a):
+    if _TABLE_HEADER.match(a) or is_header_row(a):
         return []
     taken, out = [], []
     for f in _MATCH_ORDER:
@@ -95,9 +95,29 @@ def label_end(line: str, end: int) -> int:
         end = g.end()
 
 
+def _bare_label(seg: str) -> bool:
+    """The segment is a label and nothing else ("CONSIGNEE", "NOTIFY PARTY", "Booking No")."""
+    a = asciify(seg).strip().rstrip(":").strip()
+    if not a:
+        return False
+    for f in _MATCH_ORDER:
+        m = _COMPILED[f].match(a)
+        if m and not a[m.end():].strip(" :-/"):
+            return True
+    m = IGNORED_LABEL.match(a)
+    return bool(m and not a[m.end():].strip(" :-/."))
+
+
+def is_header_row(line: str) -> bool:
+    """A row of bare labels ("SHIPPER / EXPORTER    CONSIGNEE    NOTIFY PARTY") is a form header, not a field.
+    It carries no values, so it must not claim any field (first occurrence wins) or be read as a value."""
+    parts = [p for p in re.split(r"\t|\s{2,}", line.strip()) if p.strip()]
+    return len(parts) >= 2 and all(_bare_label(p) for p in parts)
+
+
 def looks_like_label(line: str) -> bool:
     """True if the line starts a new labelled entry (compared or ignored)."""
     a = asciify(line).strip()
     if not a:
         return False
-    return match_label(line) is not None or bool(IGNORED_LABEL.match(a))
+    return match_label(line) is not None or bool(IGNORED_LABEL.match(a)) or is_header_row(line)
