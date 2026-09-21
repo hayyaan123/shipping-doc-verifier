@@ -59,6 +59,7 @@ class VisionReader:
         self.timeout = timeout
         self.calls = self.cache_hits = self.failures = 0
         self.last_engine = ""
+        self.last_error = ""
 
     # ------------------------------------------------------------------
     @classmethod
@@ -111,8 +112,17 @@ class VisionReader:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 data = json.loads(r.read())
             return data["choices"][0]["message"]["content"]
-        except Exception:
+        except urllib.error.HTTPError as e:
             self.failures += 1
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                detail = ""
+            self.last_error = f"HTTP {e.code}: {detail}"
+            return None
+        except Exception as e:
+            self.failures += 1
+            self.last_error = f"{type(e).__name__}: {str(e)[:200]}"
             return None
 
     def _tesseract(self, pages: list) -> Optional[str]:

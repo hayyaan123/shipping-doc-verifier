@@ -119,6 +119,8 @@ def main(argv=None) -> int:
     print(text_report(results).split("\n\n")[0])
     if vision:
         print(f"[vision] model calls={vision.calls} cache hits={vision.cache_hits} failures={vision.failures}")
+        if vision.last_error:
+            print(f"[vision] last error: {vision.last_error}")
     if jev:
         print(f"[jev] live calls={jev.calls} cache hits={jev.cache_hits} failures={jev.failures}"
               + (f" | disabled: {jev.disabled_reason}" if jev.disabled_reason else ""))
