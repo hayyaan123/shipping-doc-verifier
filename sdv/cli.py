@@ -60,6 +60,15 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
+    if args.cmd in ("run", "stress"):
+        from .deps import MissingDependency, require
+
+        try:
+            require()
+        except MissingDependency as e:
+            print(f"[error] {e}", file=sys.stderr)
+            return 2
+
     if args.cmd == "audit":
         return _audit(args)
     if args.cmd == "serve":

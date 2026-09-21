@@ -40,8 +40,10 @@ def read_text_bytes(data: bytes) -> DocText:
 def read_pdf_bytes(data: bytes) -> DocText:
     try:
         import pdfplumber
-    except ImportError:  # pragma: no cover
-        return DocText("pdf", readable=False, error="pdfplumber not installed")
+    except ImportError as e:  # environment problem, not a property of the document
+        from .deps import MissingDependency
+
+        raise MissingDependency("pdfplumber is not installed; run: python -m pip install -r requirements.txt") from e
     try:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             pages = len(pdf.pages)
@@ -77,8 +79,10 @@ def _emit(label: str, value_lines: list) -> list:
 def read_docx_bytes(data: bytes) -> DocText:
     try:
         import docx
-    except ImportError:  # pragma: no cover
-        return DocText("docx", readable=False, error="python-docx not installed")
+    except ImportError as e:  # environment problem, not a property of the document
+        from .deps import MissingDependency
+
+        raise MissingDependency("python-docx is not installed; run: python -m pip install -r requirements.txt") from e
     try:
         d = docx.Document(io.BytesIO(data))
     except Exception as e:
@@ -116,8 +120,10 @@ def _fmt_cell(v) -> str:
 def read_xlsx_bytes(data: bytes) -> DocText:
     try:
         import openpyxl
-    except ImportError:  # pragma: no cover
-        return DocText("xlsx", readable=False, error="openpyxl not installed")
+    except ImportError as e:  # environment problem, not a property of the document
+        from .deps import MissingDependency
+
+        raise MissingDependency("openpyxl is not installed; run: python -m pip install -r requirements.txt") from e
     try:
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     except Exception as e:

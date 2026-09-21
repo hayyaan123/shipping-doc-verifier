@@ -13,6 +13,7 @@ from .doctype import detect_doc_type
 from .extract import build_record
 from .models import (DOC_BL, DOC_SI, DOC_UNKNOWN, FIELDS, MATCH, MISMATCH, MISSING_ATTACHMENT, MISSING_VALUE, NEEDS_REVIEW,
                      OK, REVIEW_PRIORITY, UNCERTAIN, UNREADABLE, WRONG_DOC_TYPE, WRONG_DOC_TYPES, EmailResult)
+from .deps import MissingDependency
 from .readers import read_document
 from .triage import triage
 
@@ -193,6 +194,8 @@ def process_all(inbox, jev=None, jev_mode: str = "auto", limit: Optional[int] = 
             break
         try:
             results.append(process_email(email, inbox, jev, jev_mode, vision))
+        except MissingDependency:
+            raise  # environment problem: stop loudly instead of producing wrong verdicts
         except Exception as e:  # a processing FAILURE is visible and retryable, not a silent guess
             r = EmailResult(email_id=email["email_id"], subject=email.get("subject", ""))
             r.category = "GENERAL"

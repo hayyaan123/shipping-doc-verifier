@@ -128,3 +128,25 @@ def test_stress_harness_runs_and_every_class_passes():
     assert s["base_cases"] >= 1
     for cls, v in s["by_class"].items():
         assert v["passed"] == v["cases"], (cls, v)
+
+
+def test_missing_library_is_a_loud_error_not_an_unreadable_verdict(monkeypatch):
+    import builtins
+
+    from sdv.deps import MissingDependency
+    from sdv.readers import read_pdf_bytes
+
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "pdfplumber":
+            raise ImportError("no")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    try:
+        read_pdf_bytes(b"%PDF")
+    except MissingDependency as e:
+        assert "requirements.txt" in str(e)
+        return
+    raise AssertionError("expected MissingDependency")
