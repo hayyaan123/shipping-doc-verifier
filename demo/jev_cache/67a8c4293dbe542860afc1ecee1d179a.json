@@ -1,0 +1,1 @@
+{"model": "jev-1.13.0", "answers": {"field": {"type": "choice", "choice": "notify_party", "confidence": 0.8, "probabilities": {"shipper": 0.04, "port_of_discharge": 0.0, "gross_weight_kg": 0.0, "port_of_loading": 0.0, "none": 0.1, "consignee": 0.03, "notify_party": 0.83, "container_count": 0.0}}}, "usage": {"input_tokens": 491, "output_tokens": 87}}

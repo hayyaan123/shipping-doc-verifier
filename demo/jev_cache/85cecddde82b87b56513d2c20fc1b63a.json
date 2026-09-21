@@ -1,0 +1,1 @@
+{"model": "jev-1.13.0", "answers": {"category": {"type": "choice", "choice": "INVOICE_QUERY", "confidence": 1.0, "probabilities": {"SPAM": 0.0, "SI_REQUEST": 0.0, "GENERAL": 0.0, "BL_COMPARISON": 0.0, "INVOICE_QUERY": 1.0}}, "asks_to_send_draft": {"type": "noul", "noul": 0.04}}, "usage": {"input_tokens": 642, "output_tokens": 84}}
