@@ -19,7 +19,7 @@ def main(argv=None) -> int:
     run = sub.add_parser("run", help="process the inbox and write results")
     run.add_argument("--data", required=True, help="folder with inbox/ + attachments/, or http://localhost:8080")
     run.add_argument("--out", default="out", help="output folder (results.json, report.txt, report.html, submission.json)")
-    run.add_argument("--jev", choices=["off", "auto", "all"], default="auto",
+    run.add_argument("--jev", choices=["off", "auto", "all"], default="all",
                      help="off: rules only | auto: Jev only where rules are unsure | all: Jev on every email")
     run.add_argument("--env", default=".env", help="path to the git-ignored env file holding the Jev key")
     run.add_argument("--limit", type=int, default=None)
@@ -31,6 +31,13 @@ def main(argv=None) -> int:
     aud.add_argument("--out", default="out")
     aud.add_argument("--env", default=".env")
     aud.add_argument("--limit", type=int, default=None)
+
+    st = sub.add_parser("stress", help="perturb clean documents and check the verdicts move the right way")
+    st.add_argument("--data", required=True)
+    st.add_argument("--out", default="out")
+    st.add_argument("--limit", type=int, default=None)
+    st.add_argument("--jev", choices=["off", "auto", "all"], default="off", help="also let Jev resolve unfamiliar labels")
+    st.add_argument("--env", default=".env")
 
     srv = sub.add_parser("serve", help="run the review console over a case store")
     srv.add_argument("--db", default="out/cases.db")
@@ -55,6 +62,14 @@ def main(argv=None) -> int:
         return _audit(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "stress":
+        from .stress import format_summary, run_stress
+
+        jev = _jev(args.env) if args.jev != "off" else None
+        print(format_summary(run_stress(Inbox(args.data), args.out, args.limit, jev, args.jev)))
+        if jev:
+            print(f"[jev] live calls={jev.calls} cache hits={jev.cache_hits} failures={jev.failures}")
+        return 0
     if args.cmd == "export":
         from .console import export_static
         from .store import CaseStore

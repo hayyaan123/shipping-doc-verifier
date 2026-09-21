@@ -112,3 +112,19 @@ def test_empty_or_wrong_data_folder_is_an_error_not_a_silent_zero(tmp_path):
             assert "inbox" in str(e)
             continue
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_stress_harness_runs_and_every_class_passes():
+    import os
+    import pytest
+
+    data = os.environ.get("SDV_DATA")
+    if not data:
+        return
+    from sdv.inbox import Inbox
+    from sdv.stress import run_stress
+
+    s = run_stress(Inbox(data), out_dir="out", limit=8)
+    assert s["base_cases"] >= 1
+    for cls, v in s["by_class"].items():
+        assert v["passed"] == v["cases"], (cls, v)

@@ -36,6 +36,7 @@ escalated to a human instead of guessed.
 | `sdv/store.py` | SQLite case store; reviewer decisions; failed cases are retryable and distinct from verdicts |
 | `sdv/console.py`, `sdv/web/` | Review console (live server) and read-only static export |
 | `sdv/audit.py` | Jev vs rule-tier agreement report (validation evidence for the AI tier) |
+| `sdv/stress.py` | Controlled-edit stress test (benign / defect / missing / broken / drift) |
 | `sdv/cloud.py` | Mirror cases and decisions to Cloud Firestore |
 
 ## Run
@@ -47,8 +48,8 @@ python scripts/check_jev.py   # optional: checks the key works (prints no key)
 
 # rules only (no network)
 python -m sdv run --data path/to/bundle --out out --jev off
-# rules + Jev on uncertain emails (recommended)
-python -m sdv run --data path/to/bundle --out out --jev auto
+# Jev on every email, rules as fallback (default)
+python -m sdv run --data path/to/bundle --out out --jev all
 # add --submit to POST to the scoring server, --limit N for a quick trial
 ```
 
@@ -61,7 +62,7 @@ python -m sdv run --data path/to/bundle --out out --jev auto
    email and lets a confident Jev (>= 0.9) overrule the rules.
 2. **Unfamiliar field labels** (`sdv/pipeline.py`): when a document uses a label the patterns do not know, Jev maps
    it to one of the 7 fields or to "none". Code then reads the value; Jev never reads or invents values.
-3. **Audit** (`python -m sdv audit`): asks Jev about every email and reports every disagreement with the rules.
+3. **Audit and stress** (`python -m sdv audit`): asks Jev about every email and reports every disagreement with the rules.
 
 Jev decides *what kind of thing this is*. Code decides *whether two values match*.
 
@@ -92,12 +93,18 @@ python -m pytest -q
 SDV_DATA=path/to/bundle python -m pytest -q   # also runs the end-to-end data test
 ```
 
-## What has and has not been validated
+## Validation (measured; reproduce with the commands shown)
 
-- On the 520-email development corpus, the rules-only pipeline reproduces the organizers'
-  reference labels on every email. **That corpus is templated**, so this shows the
-  pipeline handles those templates. It is not a claim about unseen real-world mail.
-- The Jev integration has only been exercised against mocked HTTP responses. Run
-  `scripts/check_jev.py` with a real key before relying on it, and measure `--jev auto`
-  against `--jev off`.
+| Check | Command | Result |
+| --- | --- | --- |
+| Rules-only pipeline vs the organizers' reference labels, 520 emails | `run --jev off` + `scripts/eval_local.py` | 0 disagreements |
+| Jev vs the rule tier on all 520 emails (independent second opinion) | `audit` | 520/520 agree; Jev confidence median 1.0, min 0.60 |
+| Stress test: 51 verified-clean emails, 1,530 controlled edits | `stress` | benign 306/306 stay OK; defects 459/459 caught on exactly the edited field; blanks and removals 357/357 escalated; missing attachment, wrong document, corrupt PDF 153/153 escalated; unfamiliar labels 255/255 never a false mismatch (rules-only: all escalated to a person) |
+
+Read these with care:
+
+- The 520-email corpus is templated. Agreement there shows the pipeline handles those templates, not unseen real mail.
+- The stress edits were written by us, so they test the behaviours we thought of. They do not replace real
+  variation such as new layouts, OCR noise on scans, or other languages.
 - Scanned PDFs (no text layer) are escalated as `unreadable`; no OCR verdict is trusted.
+- `stress --jev auto` measures how many unfamiliar labels Jev can resolve instead of escalating.
