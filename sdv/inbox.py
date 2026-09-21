@@ -19,7 +19,16 @@ class Inbox:
         if self.is_http:
             return json.loads(self._get("/emails"))
         d = Path(self.source) / "inbox"
-        return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("email_*.json"))]
+        found = sorted(d.glob("email_*.json")) if d.is_dir() else []
+        if not found:
+            hint = ""
+            if Path(self.source).is_dir():
+                nested = [c.parent.name for c in Path(self.source).glob("*/inbox") if c.is_dir()]
+                hint = f" Did you mean one of: {nested}?" if nested else ""
+            raise FileNotFoundError(
+                f"No emails found: expected {d} to contain email_*.json files. "
+                f"--data must be the bundle folder that holds inbox/ and attachments/.{hint}")
+        return [json.loads(p.read_text(encoding="utf-8")) for p in found]
 
     def __iter__(self):
         return iter(self.emails())

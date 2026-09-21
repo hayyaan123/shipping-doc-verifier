@@ -99,3 +99,16 @@ def test_firestore_push_and_pull_decisions(tmp_path):
     fs.docs["e3"]["review"] = {"decision": "dismissed", "note": "teammate", "reviewer": "friend"}
     assert pull_decisions(s, client=fs) == 1
     assert s.get("e3")["review"]["note"] == "teammate"
+
+
+def test_empty_or_wrong_data_folder_is_an_error_not_a_silent_zero(tmp_path):
+    from sdv.inbox import Inbox
+
+    (tmp_path / "bundle" / "inbox").mkdir(parents=True)
+    for src in (tmp_path, tmp_path / "missing", tmp_path / "bundle"):
+        try:
+            Inbox(str(src)).emails()
+        except FileNotFoundError as e:
+            assert "inbox" in str(e)
+            continue
+        raise AssertionError("expected FileNotFoundError")
