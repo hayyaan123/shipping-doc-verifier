@@ -1,4 +1,4 @@
-# Shipping document verifier
+# Shipping Desk
 
 Averis x Monash Hackathon 2026. Reads a shipping-operations inbox, classifies every
 email, and for bill-of-lading comparison requests compares the Shipping Instruction (SI)
