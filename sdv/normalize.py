@@ -1,0 +1,130 @@
+"""Per-field normalization. Each field has its own rule; there is no shared string comparison.
+
+Everything here is deterministic. Reading is fuzzy (that is what models are for); deciding whether
+two values agree is not, so it is done in plain code.
+"""
+from __future__ import annotations
+
+import re
+import unicodedata
+from typing import Optional
+
+# Values that mean "nothing was filled in".
+PLACEHOLDER = re.compile(
+    r"^\s*(?:n\s*/\s*a|n\.a\.?|na|tba|tbd|tbc|to\s+be\s+(?:advised|confirmed|determined|announced)|nil|none|unknown|"
+    r"pending|-+|_+\s*[a-z]*|\?+.*|x{2,}|\.+)\s*$",
+    re.I,
+)
+
+
+def is_blank(raw: Optional[str]) -> bool:
+    return raw is None or not raw.strip() or bool(PLACEHOLDER.match(raw))
+
+
+_LEGAL = {
+    "co", "company", "ltd", "limited", "llc", "lp", "llp", "inc", "incorporated", "corp", "corporation",
+    "pte", "pty", "sdn", "bhd", "gmbh", "ag", "sa", "bv", "nv", "fze", "fzco", "fz", "fzc", "jsc", "plc", "srl", "oy", "as",
+}
+
+
+def _fold(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.upper()
+
+
+def normalize_party(raw: str) -> str:
+    """Case, punctuation and legal-suffix insensitive; otherwise exact.
+
+    "KTP CO., LTD" == "KTP Co Ltd"; "FZ-LLC" == "FZ LLC". A different word is a real difference.
+    """
+    s = _fold(raw).replace("&", " AND ")
+    s = re.sub(r"[^A-Z0-9()]+", " ", s)  # punctuation -> space (parentheses kept: "(M)" is meaningful)
+    tokens = [t for t in s.split() if t]
+    core = [t for t in tokens if t.lower() not in _LEGAL]
+    return " ".join(core) if core else " ".join(tokens)
+
+
+def party_name_only(lines_first: str) -> str:
+    """A party value is its NAME. Addresses follow on continuation lines and are not compared."""
+    return lines_first.strip()
+
+
+# Port aliases: different spellings of the same place -> one canonical form.
+_PORT_ALIASES = {
+    "PORT KELANG": "PORT KLANG",
+    "KLANG": "PORT KLANG",
+    "PELABUHAN KLANG": "PORT KLANG",
+    "NHAVA SHEVA": "NHAVA SHEVA",
+    "JAWAHARLAL NEHRU": "NHAVA SHEVA",
+    "JNPT": "NHAVA SHEVA",
+    "TUTICORIN": "TUTICORIN",
+    "THOOTHUKUDI": "TUTICORIN",
+    "TUTICORIN THOOTHUKUDI": "TUTICORIN",
+    "HO CHI MINH": "HO CHI MINH",
+    "SAIGON": "HO CHI MINH",
+    "BUSAN": "BUSAN",
+    "PUSAN": "BUSAN",
+}
+
+
+def normalize_port(raw: str) -> tuple:
+    """-> (city, country). UN/LOCODE and terminal names in parentheses are dropped; the NAME is compared.
+
+    The LOCODE is deliberately not used: in this corpus a changed port keeps the original code, so
+    comparing codes would miss every planted port defect.
+    """
+    s = _fold(raw)
+    s = re.sub(r"\([^)]*\)", " ", s)  # (CNNTG), (WESTPORT)
+    s = re.sub(r"\s+", " ", s).strip(" ,;-")
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    city = parts[0] if parts else ""
+    country = parts[-1] if len(parts) > 1 else None
+    city = re.sub(r"[^A-Z0-9 ]+", " ", city)
+    city = re.sub(r"\s+", " ", city).strip()
+    city = _PORT_ALIASES.get(city, city)
+    if country:
+        country = re.sub(r"[^A-Z0-9 ]+", " ", country)
+        country = re.sub(r"\s+", " ", country).strip()
+    return (city, country)
+
+
+_INT = re.compile(r"^\s*(\d+)")
+
+
+def normalize_containers(raw: str) -> Optional[int]:
+    """Leading integer; the equipment type (20'GP vs 20'FCL) is not part of the count."""
+    m = _INT.match(raw.replace(",", ""))
+    return int(m.group(1)) if m else None
+
+
+_NUM = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
+_TONNE = re.compile(r"\b(?:mts?|tonnes?|tons?)\b", re.I)
+
+
+def normalize_weight_kg(raw: str) -> Optional[float]:
+    """Number with separators/units stripped; tonnes converted to kilograms."""
+    m = _NUM.search(raw)
+    if not m:
+        return None
+    v = float(m.group(1).replace(",", ""))
+    if _TONNE.search(raw[m.end():]):
+        v *= 1000.0
+    return v
+
+
+def normalize(field: str, raw: str):
+    if field in ("shipper", "consignee", "notify_party"):
+        return normalize_party(raw)
+    if field in ("port_of_loading", "port_of_discharge"):
+        return normalize_port(raw)
+    if field == "container_count":
+        return normalize_containers(raw)
+    if field == "gross_weight_kg":
+        return normalize_weight_kg(raw)
+    return raw.strip()
+
+
+def display(field: str, raw: str) -> str:
+    """Human-readable value for the report: as written, minus surrounding noise."""
+    return re.sub(r"\s+", " ", raw).strip()
