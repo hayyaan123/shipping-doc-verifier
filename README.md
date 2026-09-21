@@ -5,6 +5,11 @@ email, and for bill-of-lading comparison requests compares the Shipping Instruct
 against the draft Bill of Lading (BL) on 7 fields. Anything it cannot verify is
 escalated to a human instead of guessed.
 
+**Live demo: https://shipping-doc-verifier.onrender.com** — the bundled synthetic inbox (520 emails) is already
+processed there; the home page also takes a folder, a `.zip` or a link of your own. It needs no API key: the Jev
+answers it shows were computed ahead of time and ship in `demo/jev_cache/`. On a free host the first request after
+15 idle minutes takes about a minute to wake.
+
 ## Quick start (setup)
 
 ```bash
@@ -18,7 +23,7 @@ The app is two separate parts: a **backend** (`sdv/`, a JSON API) and a **fronte
 files that only talk to that API). `--frontend frontend` is a convenience that lets the backend also serve the static
 files; they can equally be hosted apart (see "Architecture and hosting").
 Or with Docker: `docker compose up --build` and open http://localhost:7860.
-A live copy runs on a free cloud host (see "Hosting"); its link is in the submission form.
+A live copy runs on a free cloud host: https://shipping-doc-verifier.onrender.com (see "Hosting").
 Jev is optional: put `TYPESAFE_API_KEY=...` in `.env` (copy `.env.example`) and add `--jev all` to turn it on.
 The command-line pipeline still exists for batch runs: `python -m sdv run --data demo/data --out out --jev off`.
 
@@ -224,6 +229,7 @@ docker compose up --build     # http://localhost:7860
 ```
 
 Render (free web service, no card): New > Web Service > Public Git Repository > this repo > Runtime Docker > Free.
+Set the health check path to `/api/health`. The copy running from this repo is https://shipping-doc-verifier.onrender.com.
 A free service sleeps after 15 minutes without traffic (about a minute to wake); a free uptime pinger on
 `/api/health` every 5 minutes keeps it awake. If you copy your local `.cache/jev/*.json` into `demo/jev_cache/` before
 building, the hosted sample shows the classifications made with Jev and still needs no key. Free hosts have temporary
